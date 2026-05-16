@@ -1,0 +1,8 @@
+{
+  "name": "hydro-ai-tutor",
+  "version": "0.1.0",
+  "description": "AI 刷题建议：基于 DeepSeek 的小学生 OI 启发式辅导插件",
+  "main": "index.ts",
+  "license": "MIT",
+  "dependencies": {}
+}

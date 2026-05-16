@@ -1,0 +1,279 @@
+{% extends "layout/basic.html" %}
+{% block content %}
+<div class="row" data-rid="{{ rdoc._id }}">
+  {# Hidden CSRF token, always available to JS regardless of state #}
+  <input type="hidden" id="ai-csrf" value="{{ handler.csrfToken }}">
+  <div class="medium-9 columns">
+
+    {# ─────────── AI 刷题建议 主区域 ─────────── #}
+    <div class="section" id="ai-suggestion-section">
+      <div class="section__header">
+        <h1 class="section__title">
+          {{ _('刷题建议') }}
+          <span style="font-size: 0.55em; color: #888; font-weight: normal;">
+            ({{ _('本月剩余配额') }}: <span id="ai-quota-remaining">{{ usage.remaining }}</span>/{{ usage.limit }})
+          </span>
+        </h1>
+        <div class="section__tools">
+          <a class="rounded button" href="{{ url('record_detail', rid=rdoc._id) }}">
+            <span class="icon icon-arrow-left"></span> {{ _('返回评测详情') }}
+          </a>
+        </div>
+      </div>
+
+      <div class="section__body">
+        {% if not apiKeyConfigured %}
+          <blockquote class="warn">
+            <p>{{ _('AI 服务尚未配置，请管理员在服务器 .env 文件中填入对应的 API Key（如 DEEPSEEK_API_KEY），然后重启 Hydro。') }}</p>
+          </blockquote>
+        {% endif %}
+
+        {% if providerLabel %}
+          <p style="color:#888; font-size: 0.9em; margin: 0 0 8px 0;">
+            {{ _('当前模型') }}：{{ providerLabel }}
+          </p>
+        {% endif %}
+
+        {# 显示区，三种状态：初始 / 流式中 / 完成 #}
+        <div id="ai-result-box" class="ai-result-box">
+          {% if saved %}{{ saved.content }}{% endif %}
+        </div>
+
+        {# 状态行（按钮 / loading 提示 / 耗时） #}
+        <div id="ai-controls" style="margin-top: 12px;">
+          {% if saved %}
+            <button id="ai-rerun" class="rounded button" type="button">{{ _('重新分析') }}</button>
+            <form method="post" action="" style="display:inline; margin-left: 4px;">
+              <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+              <input type="hidden" name="operation" value="clear">
+              <button class="rounded button text-maroon" type="submit"
+                      onclick="return confirm('{{ _("确定清除已有的 AI 分析吗？此操作不会返还配额。") }}')">
+                {{ _('清除分析') }}
+              </button>
+            </form>
+            <span class="ai-meta" style="color:#888; margin-left: 8px;">
+              {{ _('分析完成，耗时 {0} 秒').format((saved.durationMs / 1000)|round(1)) }} ·
+              {{ saved.model }}
+            </span>
+          {% else %}
+            <button id="ai-start" class="rounded primary button" type="button"
+                    {% if not apiKeyConfigured or usage.remaining <= 0 %}disabled{% endif %}>
+              {{ _('开始分析') }}
+            </button>
+            {% if usage.remaining <= 0 %}
+              <span style="color:#c0392b; margin-left:8px;">{{ _('本月配额已用完') }}</span>
+            {% endif %}
+          {% endif %}
+          <span id="ai-status" style="color:#888; margin-left: 8px;"></span>
+        </div>
+      </div>
+    </div>
+
+
+  </div>
+
+  {# ─────────── 侧边栏：本次提交信息 ─────────── #}
+  <div class="medium-3 columns">
+    <div class="section side">
+      <div class="section__header"><h1 class="section__title">{{ _('Information') }}</h1></div>
+      <div class="section__body typo no-media">
+        <dl class="large horizontal">
+          <dt>{{ _('Problem') }}</dt>
+          <dd>
+            <a href="{{ url('problem_detail', pid=pdoc.pid|default(pdoc.docId)) }}">{{ pdoc.title }}</a>
+          </dd>
+          <dt>{{ _('Status') }}</dt>
+          <dd>{{ model.builtin.STATUS_TEXTS[rdoc.status] }}</dd>
+          {% if typeof(rdoc.score) == 'number' %}
+            <dt>{{ _('Score') }}</dt><dd>{{ rdoc.score }}</dd>
+          {% endif %}
+          {% if rdoc.lang %}
+            <dt>{{ _('Language') }}</dt>
+            <dd>{{ model.setting.langs[rdoc.lang].display if model.setting.langs[rdoc.lang] else rdoc.lang }}</dd>
+          {% endif %}
+          <dt>{{ _('Submit At') }}</dt>
+          <dd>{{ datetimeSpan(rdoc._id, false)|safe }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .ai-result-box {
+    min-height: 80px;
+    padding: 12px 16px;
+    border: 1px solid #e1e5e8;
+    border-radius: 4px;
+    background: #fafbfc;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.7;
+    font-size: 14px;
+  }
+  .ai-result-box code,
+  .ai-result-box :not(pre) > code {
+    background: #eef0f2;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 0.92em;
+  }
+  .ai-prompt-pre {
+    margin: 0;
+    padding: 14px 16px;
+    background: #f6f8fa;
+    color: #24292e;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+    max-height: 480px;
+    overflow: auto;
+    border-radius: 0 0 4px 4px;
+  }
+  .ai-meta { font-size: 0.9em; }
+  #ai-status .ai-spinner {
+    display:inline-block; width:12px; height:12px; border-radius:50%;
+    border:2px solid #ccc; border-top-color:#4690d0;
+    animation: ai-spin 0.8s linear infinite; vertical-align:middle; margin-right:4px;
+  }
+  @keyframes ai-spin { to { transform: rotate(360deg); } }
+</style>
+
+<script>
+(function () {
+  var rid = document.querySelector('[data-rid]').getAttribute('data-rid');
+  var startBtn = document.getElementById('ai-start');
+  var rerunBtn = document.getElementById('ai-rerun');
+  var box = document.getElementById('ai-result-box');
+  var statusEl = document.getElementById('ai-status');
+  var quotaEl = document.getElementById('ai-quota-remaining');
+  var controls = document.getElementById('ai-controls');
+  var csrfEl = document.getElementById('ai-csrf');
+  var CSRF = csrfEl ? csrfEl.value : '';
+
+  // very small markdown-ish renderer: only convert single backticks `x` to <code>x</code>
+  function renderInline(s) {
+    var esc = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return esc.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  }
+
+  // Re-render server-rendered saved content so backticks become <code>
+  if (box && box.textContent && box.textContent.trim().length) {
+    box.innerHTML = renderInline(box.textContent);
+  }
+
+  function setStatus(html) { statusEl.innerHTML = html; }
+
+  async function run() {
+    if (startBtn) startBtn.disabled = true;
+    if (rerunBtn) rerunBtn.disabled = true;
+    box.innerHTML = '';
+    setStatus('<span class="ai-spinner"></span>' + '正在调用 AI，请耐心等待...');
+
+    var t0 = Date.now();
+    var full = '';
+    var errored = false;
+    try {
+      var body = new URLSearchParams();
+      body.set('operation', 'start');
+      if (CSRF) body.set('csrfToken', CSRF);
+
+      var resp = await fetch(window.location.pathname, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+
+      if (!resp.ok || !resp.body) {
+        var msg = '';
+        try { var j = await resp.json(); msg = j.error || j.message || ''; } catch (e) { msg = resp.statusText; }
+        box.innerHTML = '<span style="color:#c0392b;">出错了：' + msg + '</span>';
+        setStatus('');
+        errored = true;
+        return;
+      }
+
+      // Once first byte arrives, switch status to "receiving"
+      setStatus('<span class="ai-spinner"></span>' + '正在接收 AI 回复...');
+
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder('utf-8');
+      var buf = '';
+      while (true) {
+        var r = await reader.read();
+        if (r.done) break;
+        buf += decoder.decode(r.value, { stream: true });
+        var parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (var i = 0; i < parts.length; i++) {
+          var line = parts[i].trim();
+          if (!line.startsWith('data:')) continue;
+          var data = line.slice(5).trim();
+          if (!data) continue;
+          try {
+            var ev = JSON.parse(data);
+            if (ev.type === 'chunk') {
+              full += ev.content;
+              box.innerHTML = renderInline(full);
+            } else if (ev.type === 'done') {
+              if (quotaEl && typeof ev.remaining === 'number') quotaEl.textContent = ev.remaining;
+              var secs = Math.round(ev.durationMs / 100) / 10;
+              setStatus('分析完成，耗时 ' + secs + ' 秒');
+              // Swap initial "开始分析" for "重新分析" + "清除分析"
+              if (startBtn) renderActionButtons(secs);
+              else if (rerunBtn) rerunBtn.disabled = false;
+            } else if (ev.type === 'error') {
+              errored = true;
+              box.innerHTML += '\n\n<span style="color:#c0392b;">出错了：' + ev.error + '</span>';
+              setStatus('');
+            }
+          } catch (e) { /* ignore */ }
+        }
+      }
+    } catch (e) {
+      errored = true;
+      box.innerHTML += '\n\n<span style="color:#c0392b;">网络出错：' + e.message + '</span>';
+      setStatus('');
+    } finally {
+      if (startBtn && !errored) startBtn.style.display = 'none';
+      if (startBtn && errored) startBtn.disabled = false;
+      if (rerunBtn) rerunBtn.disabled = false;
+    }
+  }
+
+  function renderActionButtons(secs) {
+    controls.innerHTML =
+      '<button id="ai-rerun" class="rounded button" type="button">重新分析</button>' +
+      '<form method="post" action="" style="display:inline; margin-left:4px;">' +
+        '<input type="hidden" name="csrfToken" value="' + CSRF + '">' +
+        '<input type="hidden" name="operation" value="clear">' +
+        '<button class="rounded button text-maroon" type="submit" ' +
+          'onclick="return confirm(\'确定清除已有的 AI 分析吗？此操作不会返还配额。\')">清除分析</button>' +
+      '</form>' +
+      '<span class="ai-meta" style="color:#888; margin-left:8px;">分析完成，耗时 ' + secs + ' 秒</span>' +
+      '<span id="ai-status" style="color:#888; margin-left:8px;"></span>';
+    document.getElementById('ai-rerun').addEventListener('click', run);
+  }
+
+  if (startBtn) startBtn.addEventListener('click', run);
+  if (rerunBtn) rerunBtn.addEventListener('click', run);
+
+  var copyBtn = document.getElementById('ai-copy-prompt');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function () {
+      var text = document.getElementById('ai-prompt-content').textContent;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function () {
+          copyBtn.textContent = '已复制 ✓';
+          setTimeout(function () { copyBtn.innerHTML = '<span class="icon icon-copy"></span> Copy'; }, 1500);
+        });
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}
