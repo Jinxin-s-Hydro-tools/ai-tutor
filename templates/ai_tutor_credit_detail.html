@@ -1,0 +1,160 @@
+{% extends "layout/basic.html" %}
+{% import "components/paginator.html" as paginator with context %}
+{% block content %}
+<div class="row">
+  <div class="medium-12 columns">
+    <div class="section">
+      <div class="section__header ai-credit-header">
+        <div>
+          <h1 class="section__title">{{ _('AI 积分明细') }}</h1>
+          <span class="ai-credit-subtitle">当前域 {{ domainId }} · 共 {{ rowCount }} 条积分变动记录</span>
+        </div>
+        <a class="rounded button" href="javascript:history.back()">返回</a>
+      </div>
+      <div class="section__body">
+        <div class="ai-credit-stats">
+          <div class="ai-credit-stat ai-credit-stat-main">
+            <span>当前积分</span>
+            <strong>{{ balance }}</strong>
+          </div>
+          <div class="ai-credit-stat">
+            <span>累计获得</span>
+            <strong>{{ totalEarned }}</strong>
+          </div>
+          <div class="ai-credit-stat">
+            <span>累计使用</span>
+            <strong>{{ totalSpent }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">积分流水</h1>
+      </div>
+      <div class="section__body no-padding">
+        {% if rows|length == 0 %}
+          <div class="ai-credit-empty">还没有积分变动记录。</div>
+        {% else %}
+          <div class="ai-credit-table-wrap">
+            <table class="data-table ai-credit-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th class="col--center">变动</th>
+                  <th>操作者</th>
+                  <th>题号</th>
+                  <th>原因</th>
+                  <th>有效期</th>
+                  <th>关联</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in rows %}
+                  <tr>
+                    <td>{{ datetimeSpan(row.at, true)|safe }}</td>
+                    <td class="col--center">
+                      {% if row.amount > 0 %}
+                        <strong class="ai-credit-plus">+{{ row.amount }}</strong>
+                      {% else %}
+                        <strong class="ai-credit-minus">{{ row.amount }}</strong>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if row.operatorUid and operators[row.operatorUid] %}
+                        {{ user.render_inline(operators[row.operatorUid], badge=false) }}
+                      {% elif row.operatorUid %}
+                        <span class="text-gray">#{{ row.operatorUid }}</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if row.pid %}
+                        {% set problemKey = row.domainId + ':' + row.pid %}
+                        {% if problems[problemKey] %}
+                          {{ problems[problemKey].display }}
+                        {% else %}
+                          {{ row.pid }}
+                        {% endif %}
+                      {% endif %}
+                    </td>
+                    <td>
+                      {{ row.reason }}
+                      {% if row.legacy %}
+                        <span class="ai-credit-legacy">历史记录</span>
+                      {% endif %}
+                      {% if row.refundedAt %}
+                        <span class="ai-credit-legacy">已退回</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if row.expiresAt %}
+                        {% if row.expiredAt %}
+                          <span class="ai-credit-expired">已过期</span>
+                        {% else %}
+                          <span>{{ datetimeSpan(row.expiresAt, true)|safe }} 到期</span>
+                          {% if row.remaining is defined %}
+                            <div class="text-gray">剩余 {{ row.remaining }}</div>
+                          {% endif %}
+                        {% endif %}
+                      {% else %}
+                        <span class="text-gray">-</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if row.rid and row.domainId %}
+                        {% if row.kind == 'aiAnalysis' %}
+                          <a class="typo-a" href="/d/{{ row.domainId }}/record/{{ row.rid }}/ai">查看 AI 记录</a>
+                        {% else %}
+                          <a class="typo-a" href="/d/{{ row.domainId }}/record/{{ row.rid }}">查看提交</a>
+                        {% endif %}
+                      {% elif row.domainId and row.pid %}
+                        <a class="typo-a" href="/d/{{ row.domainId }}/p/{{ row.pid }}">查看题目</a>
+                      {% else %}
+                        <span class="text-gray">-</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {{ paginator.render(page, pageCount) }}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .ai-credit-header {
+    align-items: center; display: flex; gap: 16px; justify-content: space-between;
+  }
+  .ai-credit-subtitle { color: #78828d; display: block; font-size: 13px; margin-top: 5px; }
+  .ai-credit-stats {
+    display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ai-credit-stat {
+    background: #f5f7f8; border-radius: 6px; padding: 13px 14px;
+  }
+  .ai-credit-stat span { color: #687580; display: block; font-size: 12px; margin-bottom: 5px; }
+  .ai-credit-stat strong { font-size: 22px; font-weight: 500; }
+  .ai-credit-stat-main { background: #eaf4fc; color: #2677ad; }
+  .ai-credit-table-wrap { overflow-x: auto; }
+  .ai-credit-table { min-width: 960px; top: auto !important; }
+  .ai-credit-table td { vertical-align: middle; }
+  .ai-credit-plus { color: #237343; }
+  .ai-credit-minus { color: #c0392b; }
+  .ai-credit-expired { color: #c0392b; }
+  .ai-credit-legacy {
+    display: inline-block; margin-left: 6px; padding: 1px 5px;
+    background: #f0f2f4; border-radius: 4px; color: #78828d; font-size: 12px;
+  }
+  .ai-credit-empty { color: #888; padding: 32px 20px; text-align: center; }
+  .pager { padding-bottom: 16px; }
+  @media screen and (max-width: 640px) {
+    .ai-credit-header { align-items: stretch; flex-direction: column; }
+    .ai-credit-stats { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}

@@ -9,9 +9,10 @@
     <div class="section" id="ai-suggestion-section">
       <div class="section__header">
         <h1 class="section__title">
-          {{ _('刷题建议') }}
+          {{ _('AI 刷题建议') }}
           <span style="font-size: 0.55em; color: #888; font-weight: normal;">
-            ({{ _('本月剩余配额') }}: <span id="ai-quota-remaining">{{ usage.remaining }}</span>/{{ usage.limit }})
+            ({{ _('本域积分') }}: <span id="ai-balance">{{ usage.balance }}</span>
+            · {{ _('本月已用') }}: <span id="ai-monthly-used">{{ usage.monthlyUsed }}</span>/{{ usage.monthlyCap }})
           </span>
         </h1>
         <div class="section__tools">
@@ -24,55 +25,228 @@
       <div class="section__body">
         {% if not apiKeyConfigured %}
           <blockquote class="warn">
-            <p>{{ _('AI 服务尚未配置，请管理员在服务器 .env 文件中填入对应的 API Key（如 DEEPSEEK_API_KEY），然后重启 Hydro。') }}</p>
+            <p>{{ _('AI 服务尚未配置，请老师在当前域的 AI 刷题管理页填写接口配置。') }}</p>
           </blockquote>
         {% endif %}
 
         {% if providerLabel %}
           <p style="color:#888; font-size: 0.9em; margin: 0 0 8px 0;">
             {{ _('当前模型') }}：{{ providerLabel }}
+            <span style="margin-left: 12px;">
+              💡 {{ _('每道题第一次 AC 可获得本域积分，每月调用上限') }} {{ usage.monthlyCap }}。
+            </span>
           </p>
         {% endif %}
 
-        {# 显示区，三种状态：初始 / 流式中 / 完成 #}
-        <div id="ai-result-box" class="ai-result-box">
-          {% if saved %}{{ saved.content }}{% endif %}
+        {% if not aiEnabled %}
+          <blockquote class="warn">
+            <p>当前域的老师尚未为你开启 {{ _('AI 刷题建议') }}。完成自己的尝试后，可以请老师在域管理中为你开启使用权限。</p>
+          </blockquote>
+        {% elif monthlyBonus > 0 %}
+          <blockquote class="note">
+            <p>老师已为你追加本月 <strong>{{ monthlyBonus }}</strong> 次 AI 可用次数。</p>
+          </blockquote>
+        {% endif %}
+
+        {# 调用前先让学生说清楚卡点，让 AI 围绕真正的问题引导 #}
+        <div id="ai-question-box" class="ai-question-box">
+          <h2 class="ai-question-title">你这次最想解决哪个卡点？</h2>
+          <p class="ai-question-hint">先选一个最接近的方向，再写下你已经试过什么。AI 教练会从这里开始提示你。</p>
+          <div class="ai-focus-grid">
+            <label class="ai-focus-option">
+              <input type="radio" name="ai-focus" value="idea" {% if saved and saved.questionFocus == 'idea' %}checked{% endif %}>
+              <span>我还没有想清楚解题思路</span>
+            </label>
+            <label class="ai-focus-option">
+              <input type="radio" name="ai-focus" value="implementation" {% if saved and saved.questionFocus == 'implementation' %}checked{% endif %}>
+              <span>我有思路，但代码实现不对</span>
+            </label>
+            <label class="ai-focus-option">
+              <input type="radio" name="ai-focus" value="debug" {% if saved and saved.questionFocus == 'debug' %}checked{% endif %}>
+              <span>我看不懂评测结果，找不到错误</span>
+            </label>
+            <label class="ai-focus-option">
+              <input type="radio" name="ai-focus" value="keyCode" {% if saved and saved.questionFocus == 'keyCode' %}checked{% endif %}>
+              <span>某个关键操作，不知道代码怎么写</span>
+            </label>
+            <label class="ai-focus-option">
+              <input type="radio" name="ai-focus" value="boundary" {% if saved and saved.questionFocus == 'boundary' %}checked{% endif %}>
+              <span>我不确定边界情况或特殊数据</span>
+            </label>
+          </div>
+          <label class="ai-note-label" for="student-note">补充给教练的信息</label>
+          <textarea id="student-note" rows="3" maxlength="500"
+            placeholder="例如：我想到要逐个检查输入，但不知道遇到重复数字时该怎样记录；现在第 3 个测试点没有通过。">{% if saved and saved.studentNote %}{{ saved.studentNote }}{% endif %}</textarea>
+          <div class="ai-note-foot">
+            <span id="ai-question-error"></span>
+            <span><span id="student-note-count">0</span>/500</span>
+          </div>
         </div>
+
+        {# 对话区：主回复 + 反思 + 反思的 AI 回复 #}
+        <div id="ai-dialogue">
+          {% if saved %}
+            {% if saved.questionFocusLabel and saved.studentNote %}
+              <div class="dialogue-bubble bubble-student">
+                <div class="bubble-role">我的提问方向：{{ saved.questionFocusLabel }}</div>
+                <div class="bubble-content" data-raw>{{ saved.studentNote }}</div>
+              </div>
+            {% endif %}
+            <div class="dialogue-bubble bubble-tutor">
+              <div class="bubble-role">🤖 AI 教练</div>
+              <div class="bubble-content" data-raw>{{ saved.content }}</div>
+              {% if saved.interrupted %}
+                <div class="ai-interrupted-warning">
+                  AI 回复可能中断了。
+                  <button class="rounded button ai-regenerate-main" type="button">重新生成此次回复</button>
+                </div>
+              {% endif %}
+            </div>
+            {% if saved.dialogue %}
+              {% for msg in saved.dialogue %}
+                <div class="dialogue-bubble bubble-{{ msg.role }}">
+                  <div class="bubble-role">
+                    {% if msg.role == 'student' %}👦 你的想法{% else %}🤖 AI 教练{% endif %}
+                  </div>
+                  <div class="bubble-content" data-raw>{{ msg.text }}</div>
+                  {% if msg.role == 'tutor' and msg.interrupted %}
+                    <div class="ai-interrupted-warning">
+                      AI 回复可能中断了。
+                      <button class="rounded button ai-regenerate-reflection" type="button">重新生成此次回复</button>
+                    </div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            {% endif %}
+          {% else %}
+            <div id="ai-result-box" class="ai-result-box ai-empty">
+              <span style="color:#aaa;">{{ _('点击"开始分析"获取 AI 教练的反馈') }}</span>
+            </div>
+          {% endif %}
+        </div>
+
+        {# 反思输入：仅在有主回复 且 还没写过反思 时显示 #}
+        {% set hasStudentMsg = false %}
+        {% if saved and saved.dialogue %}
+          {% for m in saved.dialogue %}{% if m.role == 'student' %}{% set hasStudentMsg = true %}{% endif %}{% endfor %}
+        {% endif %}
+        {% if saved and not saved.interrupted and not hasStudentMsg %}
+          <div id="ai-reflection-box" style="margin-top: 12px;">
+            <p style="margin: 0 0 6px 0; color: #444;">
+              ✏️ 看完 AI 的建议，<strong>你打算先改哪里</strong>？写一两句话告诉教练吧（写完会得到他的回应）：
+            </p>
+            <textarea id="reflection-text" rows="3" maxlength="500"
+              style="width:100%; padding: 8px; box-sizing: border-box; font-size: 14px;
+                     border: 1px solid #d1d5da; border-radius: 4px;"
+              placeholder="例如：我想把 int 改成 char，因为题目说要读入一个字符..."></textarea>
+            <button id="reflection-submit" class="rounded button" style="margin-top: 6px;">
+              提交想法给 AI
+            </button>
+            <span id="reflection-status" style="color:#888; margin-left: 8px;"></span>
+          </div>
+        {% endif %}
 
         {# 状态行（按钮 / loading 提示 / 耗时） #}
         <div id="ai-controls" style="margin-top: 12px;">
           {% if saved %}
-            <button id="ai-rerun" class="rounded button" type="button">{{ _('重新分析') }}</button>
-            <form method="post" action="" style="display:inline; margin-left: 4px;">
-              <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
-              <input type="hidden" name="operation" value="clear">
-              <button class="rounded button text-maroon" type="submit"
-                      onclick="return confirm('{{ _("确定清除已有的 AI 分析吗？此操作不会返还配额。") }}')">
-                {{ _('清除分析') }}
+            <button id="ai-rerun" class="rounded button" type="button"
+                    data-usage-can-use="{{ 'true' if usage.canUse else 'false' }}"
+                    data-usage-reason="{{ usage.reason }}"
+                    data-submission-passed="{{ 'true' if submissionGatePassed else 'false' }}"
+                    data-submission-reason="这道题你才提交了 {{ submissionCount }} 次。先自己再试一试，等提交满 {{ minSubmissions }} 次后再来找 AI 教练吧。"
+                    {% if not aiEnabled %}disabled{% endif %}>
+              {{ _('重新分析') }}
+            </button>
+            {% if saved.interrupted %}
+              <button id="ai-regenerate-main-control" class="rounded primary button ai-regenerate-main" type="button"
+                      data-usage-can-use="{{ 'true' if usage.canUse else 'false' }}"
+                      data-usage-reason="{{ usage.reason }}"
+                      data-submission-passed="{{ 'true' if submissionGatePassed else 'false' }}"
+                      data-submission-reason="这道题你才提交了 {{ submissionCount }} 次。先自己再试一试，等提交满 {{ minSubmissions }} 次后再来找 AI 教练吧。"
+                      {% if not aiEnabled %}disabled{% endif %}>
+                重新生成此次回复
               </button>
-            </form>
+            {% endif %}
             <span class="ai-meta" style="color:#888; margin-left: 8px;">
               {{ _('分析完成，耗时 {0} 秒').format((saved.durationMs / 1000)|round(1)) }} ·
               {{ saved.model }}
             </span>
           {% else %}
             <button id="ai-start" class="rounded primary button" type="button"
-                    {% if not apiKeyConfigured or usage.remaining <= 0 %}disabled{% endif %}>
+                    data-usage-can-use="{{ 'true' if usage.canUse else 'false' }}"
+                    data-usage-reason="{{ usage.reason }}"
+                    data-submission-passed="{{ 'true' if submissionGatePassed else 'false' }}"
+                    data-submission-reason="这道题你才提交了 {{ submissionCount }} 次。先自己再试一试，等提交满 {{ minSubmissions }} 次后再来找 AI 教练吧。"
+                    {% if not aiEnabled or not apiKeyConfigured %}disabled{% endif %}>
               {{ _('开始分析') }}
             </button>
-            {% if usage.remaining <= 0 %}
-              <span style="color:#c0392b; margin-left:8px;">{{ _('本月配额已用完') }}</span>
-            {% endif %}
           {% endif %}
+          <a class="rounded button ai-credit-detail-link" href="{{ url('ai_tutor_credit_detail') }}">
+            积分明细
+          </a>
           <span id="ai-status" style="color:#888; margin-left: 8px;"></span>
         </div>
       </div>
     </div>
 
+    {# ─────────── 自定义确认弹窗 ─────────── #}
+    <div id="ai-confirm-mask" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:9999;">
+      <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+                  background:white; padding:24px; border-radius:8px; width:90%; max-width:440px;
+                  box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+        <h3 style="margin:0 0 12px 0; font-size: 18px;">
+          🤖 确认调用 AI 教练吗？
+        </h3>
+        <div style="line-height: 1.7; color: #333; font-size: 14px;">
+          <p style="margin: 8px 0;">本次调用将：</p>
+          <ul style="margin: 4px 0 0 0; padding-left: 20px;">
+            <li>扣减 <strong>1 积分</strong>（剩余 <span id="ai-confirm-balance">-</span>）</li>
+            <li>计入本月调用 <strong>1 次</strong>（已用 <span id="ai-confirm-used">-</span>/<span id="ai-confirm-cap">-</span>）</li>
+            <li>本次提交的代码 + AI 回复会同步给老师评估学习进度 📝</li>
+          </ul>
+          <p style="margin: 12px 0 0 0; color: #888; font-size: 13px;">
+            提示：先自己琢磨一会儿再问 AI，进步更快哦～
+          </p>
+          <p id="ai-confirm-question" class="ai-confirm-question"></p>
+        </div>
+        <div style="margin-top: 18px; text-align: right;">
+          <button id="ai-confirm-cancel" class="rounded button" type="button">取消</button>
+          <button id="ai-confirm-ok" class="rounded primary button" type="button" style="margin-left: 8px;">
+            确认调用
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {# ─────────── 错误提示弹窗 ─────────── #}
+    <div id="ai-error-mask" class="ai-modal-mask" style="display:none;">
+      <div class="ai-modal-card ai-error-card">
+        <h3 class="ai-modal-title">暂时不能调用 AI 教练</h3>
+        <p id="ai-error-message" class="ai-error-message"></p>
+        <div class="ai-modal-actions">
+          <button id="ai-error-ok" class="rounded primary button" type="button">知道了</button>
+        </div>
+      </div>
+    </div>
+
+    {# ─────────── 复制给 AI 的完整内容 ─────────── #}
+    <!-- <div class="section">
+      <div class="section__header">
+        <h1 class="section__title">{{ _('复制给 AI 的完整内容') }}</h1>
+        <div class="section__tools">
+          <button class="rounded button" type="button" id="ai-copy-prompt">
+            <span class="icon icon-copy"></span> {{ _('Copy') }}
+          </button>
+        </div>
+      </div>
+      <div class="section__body no-padding">
+        <pre class="ai-prompt-pre" id="ai-prompt-content">{{ fullPrompt }}</pre>
+      </div>
+    </div> -->
 
   </div>
 
-  {# ─────────── 侧边栏：本次提交信息 ─────────── #}
+  {# ─────────── 侧边栏：本次提交信息 + 历史分析 ─────────── #}
   <div class="medium-3 columns">
     <div class="section side">
       <div class="section__header"><h1 class="section__title">{{ _('Information') }}</h1></div>
@@ -96,94 +270,348 @@
         </dl>
       </div>
     </div>
+
+    {% if saved and saved.history | length %}
+    <div class="section side" style="margin-top: 12px;">
+      <div class="section__header">
+        <h1 class="section__title" style="font-size: 14px;">历史分析（{{ saved.history | length }} 次）</h1>
+      </div>
+      <div class="section__body" style="padding: 8px 10px;">
+        {% for h in saved.history | reverse %}
+        <details class="ai-hist-entry">
+          <summary class="ai-hist-summary">
+            <span class="ai-hist-num">第 {{ saved.history | length - loop.index0 }} 次</span>
+            {% if h.interrupted %}<span class="ai-hist-tag ai-hist-interrupted">中断</span>{% endif %}
+            <span class="ai-hist-model">{{ h.model }}</span>
+            {% if h.questionFocusLabel %}
+            <div class="ai-hist-focus">{{ h.questionFocusLabel }}</div>
+            {% endif %}
+          </summary>
+          {% if h.studentNote %}
+          <div class="ai-hist-note">{{ h.studentNote }}</div>
+          {% endif %}
+          <div class="ai-hist-content" data-hist-raw>{{ h.content }}</div>
+          {% if h.dialogue and h.dialogue.length %}
+          <div class="ai-hist-dialogue-count">+ {{ h.dialogue | length }} 条对话</div>
+          {% endif %}
+        </details>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
 
 <style>
-  .ai-result-box {
-    min-height: 80px;
+  .ai-result-box, .dialogue-bubble {
     padding: 12px 16px;
     border: 1px solid #e1e5e8;
-    border-radius: 4px;
-    background: #fafbfc;
-    white-space: pre-wrap;
-    word-break: break-word;
+    border-radius: 8px;
     line-height: 1.7;
     font-size: 14px;
   }
-  .ai-result-box code,
-  .ai-result-box :not(pre) > code {
-    background: #eef0f2;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-family: Consolas, Menlo, monospace;
-    font-size: 0.92em;
+  .ai-result-box { min-height: 80px; background: #fafbfc; white-space: pre-wrap; word-break: break-word; }
+  .ai-result-box.ai-empty { min-height: 60px; text-align: center; padding-top: 22px; }
+  .dialogue-bubble { margin-bottom: 10px; word-break: break-word; }
+  .dialogue-bubble.bubble-tutor { background: #f0f7fc; border-color: #c8def0; }
+  .dialogue-bubble.bubble-student { background: #fff8e1; border-color: #ffe0a3; }
+  .bubble-role { font-weight: bold; font-size: 13px; color: #555; margin-bottom: 4px; }
+  .bubble-content { white-space: pre-wrap; word-break: break-word; }
+  .bubble-content code, .ai-result-box code,
+  .dialogue-bubble :not(pre) > code {
+    background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
+    font-family: Consolas, Menlo, monospace; font-size: 0.92em;
   }
   .ai-prompt-pre {
-    margin: 0;
-    padding: 14px 16px;
-    background: #f6f8fa;
-    color: #24292e;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: Consolas, Menlo, monospace;
-    font-size: 12.5px;
-    line-height: 1.55;
-    max-height: 480px;
-    overflow: auto;
-    border-radius: 0 0 4px 4px;
+    margin: 0; padding: 14px 16px; background: #f6f8fa; color: #24292e;
+    white-space: pre-wrap; word-break: break-word;
+    font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.55;
+    max-height: 480px; overflow: auto; border-radius: 0 0 4px 4px;
   }
   .ai-meta { font-size: 0.9em; }
-  #ai-status .ai-spinner {
-    display:inline-block; width:12px; height:12px; border-radius:50%;
-    border:2px solid #ccc; border-top-color:#4690d0;
-    animation: ai-spin 0.8s linear infinite; vertical-align:middle; margin-right:4px;
+  .ai-question-box {
+    margin: 0 0 16px; padding: 14px 16px; background: #f7fafc;
+    border: 1px solid #dfe8ef; border-radius: 6px;
+  }
+  .ai-question-title { margin: 0; font-size: 16px; line-height: 1.5; }
+  .ai-question-hint { margin: 4px 0 12px; color: #66737f; font-size: 13px; }
+  .ai-focus-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+    margin-bottom: 12px;
+  }
+  .ai-focus-option {
+    display: flex; align-items: flex-start; gap: 7px; min-height: 38px;
+    margin: 0; padding: 9px 10px; border: 1px solid #d7e0e7;
+    border-radius: 6px; background: #fff; cursor: pointer; line-height: 1.45;
+  }
+  .ai-focus-option:has(input:checked) { border-color: #4690d0; background: #edf6fd; }
+  .ai-focus-option input { margin-top: 3px; flex: 0 0 auto; }
+  .ai-note-label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px; }
+  #student-note {
+    width: 100%; box-sizing: border-box; resize: vertical; padding: 8px 10px;
+    border: 1px solid #d1d9e0; border-radius: 4px; font-size: 14px; line-height: 1.55;
+  }
+  .ai-note-foot {
+    display: flex; justify-content: space-between; min-height: 21px;
+    margin-top: 4px; color: #788590; font-size: 12px;
+  }
+  #ai-question-error { color: #c0392b; }
+  .ai-confirm-question {
+    margin: 12px 0 0; padding: 8px 10px; border-radius: 4px;
+    background: #f1f6fa; color: #394956; font-size: 13px;
+  }
+  .ai-modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 10000;
+  }
+  .ai-modal-card {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 90%; max-width: 420px; box-sizing: border-box;
+    background: #fff; border-radius: 8px; padding: 22px 24px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  }
+  .ai-modal-title { margin: 0 0 12px; font-size: 18px; line-height: 1.5; }
+  .ai-error-card { border-top: 4px solid #d94b40; }
+  .ai-error-message { color: #4a5560; font-size: 14px; line-height: 1.7; margin: 0; }
+  .ai-modal-actions { margin-top: 18px; text-align: right; }
+  .ai-interrupted-warning {
+    align-items: center; display: flex; gap: 10px; justify-content: space-between;
+    margin-top: 10px; padding: 8px 10px; background: #fff7e6;
+    border: 1px solid #f3d29c; border-radius: 6px; color: #8a5a00; font-size: 13px;
+  }
+  .ai-interrupted-warning .button { margin: 0; white-space: nowrap; }
+  @media (max-width: 640px) {
+    .ai-focus-grid { grid-template-columns: 1fr; }
+    .ai-interrupted-warning { align-items: stretch; flex-direction: column; }
+  }
+  .ai-reanalyze-separator {
+    margin: 16px 0 12px; text-align: center; color: #888; font-size: 13px;
+    border-top: 1px solid #e0e6ec; padding-top: 12px; user-select: none;
+  }
+  .ai-hist-entry {
+    margin-bottom: 12px; border: 1px solid #e1e5e8; border-radius: 8px;
+    overflow: hidden; background: #fafbfc;
+  }
+  .ai-hist-summary {
+    padding: 10px 14px; cursor: pointer; list-style: none; user-select: none;
+    font-size: 14px; line-height: 1.5;
+  }
+  .ai-hist-summary::-webkit-details-marker { display: none; }
+  .ai-hist-summary::before { content: '▶ '; font-size: 11px; color: #aaa; }
+  details[open] .ai-hist-summary::before { content: '▼ '; }
+  .ai-hist-num { font-weight: bold; font-size: 14px; }
+  .ai-hist-tag { display: inline-block; margin-left: 5px; padding: 1px 6px; border-radius: 3px; font-size: 12px; vertical-align: middle; }
+  .ai-hist-interrupted { background: #ffeaea; color: #c0392b; }
+  .ai-hist-model { display: block; color: #888; font-size: 13px; margin-top: 2px; }
+  .ai-hist-focus { color: #4a5560; font-size: 14px; line-height: 1.5; margin-top: 3px; }
+  .ai-hist-note {
+    margin: 0 12px 8px; padding: 10px 12px;
+    background: #fff8e1; border: 1px solid #ffe0a3; border-radius: 6px;
+    font-size: 14px; line-height: 1.7; color: #5a4a00;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .ai-hist-content {
+    margin: 0 12px 10px; padding: 10px 12px;
+    background: #f0f7fc; border: 1px solid #c8def0; border-radius: 6px;
+    font-size: 14px; line-height: 1.7; color: #1a3050;
+    white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto;
+  }
+  .ai-hist-content code {
+    background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
+    font-family: Consolas, Menlo, monospace; font-size: 0.92em;
+  }
+  .ai-hist-dialogue-count { padding: 0 12px 10px; font-size: 13px; color: #888; }
+  #ai-status .ai-spinner, #reflection-status .ai-spinner {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid #ccc; border-top-color: #4690d0;
+    animation: ai-spin 0.8s linear infinite; vertical-align: middle; margin-right: 4px;
   }
   @keyframes ai-spin { to { transform: rotate(360deg); } }
 </style>
 
 <script>
 (function () {
-  var rid = document.querySelector('[data-rid]').getAttribute('data-rid');
   var startBtn = document.getElementById('ai-start');
   var rerunBtn = document.getElementById('ai-rerun');
-  var box = document.getElementById('ai-result-box');
+  var dialogueEl = document.getElementById('ai-dialogue');
   var statusEl = document.getElementById('ai-status');
-  var quotaEl = document.getElementById('ai-quota-remaining');
+  var balanceEl = document.getElementById('ai-balance');
+  var monthlyEl = document.getElementById('ai-monthly-used');
+  var monthlyCapText = monthlyEl ? monthlyEl.parentNode.textContent : '';
+  var monthlyCap = parseInt((monthlyCapText.match(/\/(\d+)/) || [])[1] || '30', 10);
   var controls = document.getElementById('ai-controls');
+  var questionErrorEl = document.getElementById('ai-question-error');
+  var studentNoteEl = document.getElementById('student-note');
+  var noteCountEl = document.getElementById('student-note-count');
   var csrfEl = document.getElementById('ai-csrf');
   var CSRF = csrfEl ? csrfEl.value : '';
+  var errorMask = document.getElementById('ai-error-mask');
+  var errorMessageEl = document.getElementById('ai-error-message');
+  var errorOkBtn = document.getElementById('ai-error-ok');
 
-  // very small markdown-ish renderer: only convert single backticks `x` to <code>x</code>
+  // Convert single-backtick `x` to <code>x</code>, escaping HTML first.
   function renderInline(s) {
     var esc = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     return esc.replace(/`([^`\n]+)`/g, '<code>$1</code>');
   }
 
-  // Re-render server-rendered saved content so backticks become <code>
-  if (box && box.textContent && box.textContent.trim().length) {
-    box.innerHTML = renderInline(box.textContent);
-  }
+  // Re-render any server-rendered bubbles (escape + backticks → <code>)
+  Array.prototype.forEach.call(document.querySelectorAll('.bubble-content[data-raw]'), function (el) {
+    el.innerHTML = renderInline(el.textContent);
+    el.removeAttribute('data-raw');
+  });
+  // Re-render history content entries
+  Array.prototype.forEach.call(document.querySelectorAll('.ai-hist-content[data-hist-raw]'), function (el) {
+    el.innerHTML = renderInline(el.textContent);
+    el.removeAttribute('data-hist-raw');
+  });
 
   function setStatus(html) { statusEl.innerHTML = html; }
 
-  async function run() {
+  function showError(message) {
+    if (!message) message = '操作失败，请稍后再试。';
+    if (!errorMask || !errorMessageEl) {
+      alert(message);
+      return;
+    }
+    errorMessageEl.textContent = message;
+    errorMask.style.display = 'block';
+  }
+
+  function hideError() {
+    if (errorMask) errorMask.style.display = 'none';
+  }
+
+  if (errorOkBtn) errorOkBtn.addEventListener('click', hideError);
+  if (errorMask) errorMask.addEventListener('click', function (e) { if (e.target === errorMask) hideError(); });
+
+  // Create a bubble in the dialogue area; returns the .bubble-content div for streaming append.
+  function appendBubble(role, headerHtml, initialText) {
+    var bubble = document.createElement('div');
+    bubble.className = 'dialogue-bubble bubble-' + role;
+    var header = document.createElement('div');
+    header.className = 'bubble-role';
+    header.innerHTML = headerHtml;
+    var body = document.createElement('div');
+    body.className = 'bubble-content';
+    body.innerHTML = initialText ? renderInline(initialText) : '';
+    bubble.appendChild(header);
+    bubble.appendChild(body);
+    // Insert before any empty placeholder (or just append)
+    var empty = document.getElementById('ai-result-box');
+    if (empty && empty.parentNode === dialogueEl) empty.parentNode.removeChild(empty);
+    dialogueEl.appendChild(bubble);
+    return body;
+  }
+
+  function appendInterruptedWarning(bodyEl, type) {
+    var bubble = bodyEl.closest ? bodyEl.closest('.dialogue-bubble') : bodyEl.parentNode;
+    if (!bubble || bubble.querySelector('.ai-interrupted-warning')) return;
+    var warn = document.createElement('div');
+    warn.className = 'ai-interrupted-warning';
+    warn.innerHTML = 'AI 回复可能中断了。 <button class="rounded button ' +
+      (type === 'reflection' ? 'ai-regenerate-reflection' : 'ai-regenerate-main') +
+      '" type="button">重新生成此次回复</button>';
+    bubble.appendChild(warn);
+    var btn = warn.querySelector('button');
+    if (btn && type === 'reflection') btn.addEventListener('click', runRegenerateReflection);
+    if (btn && type !== 'reflection') btn.addEventListener('click', prepareAnalysis);
+  }
+
+  function removeInterruptedTutorBubbles() {
+    var warnings = dialogueEl.querySelectorAll('.ai-regenerate-reflection');
+    for (var i = 0; i < warnings.length; i++) {
+      var bubble = warnings[i].closest('.dialogue-bubble');
+      if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
+    }
+  }
+
+  // ────────── Confirm modal ──────────
+  var mask = document.getElementById('ai-confirm-mask');
+  var okBtn = document.getElementById('ai-confirm-ok');
+  var cancelBtn = document.getElementById('ai-confirm-cancel');
+  var confirmBalanceEl = document.getElementById('ai-confirm-balance');
+  var confirmUsedEl = document.getElementById('ai-confirm-used');
+  var confirmCapEl = document.getElementById('ai-confirm-cap');
+  var confirmQuestionEl = document.getElementById('ai-confirm-question');
+  var pendingAction = null;
+
+  function readQuestion() {
+    var selected = document.querySelector('input[name="ai-focus"]:checked');
+    var note = studentNoteEl ? (studentNoteEl.value || '').trim() : '';
+    if (!selected) {
+      questionErrorEl.textContent = '请先选择一个最想解决的卡点。';
+      return null;
+    }
+    if (note.length < 10) {
+      questionErrorEl.textContent = '请至少写 10 个字，说说你试过什么或具体卡在哪里。';
+      if (studentNoteEl) studentNoteEl.focus();
+      return null;
+    }
+    questionErrorEl.textContent = '';
+    return {
+      focus: selected.value,
+      focusLabel: selected.parentNode.querySelector('span').textContent,
+      note: note,
+    };
+  }
+
+  function showConfirm(question) {
+    pendingAction = function () { runAnalysis(question); };
+    if (confirmBalanceEl && balanceEl) confirmBalanceEl.textContent = balanceEl.textContent;
+    if (confirmUsedEl && monthlyEl) confirmUsedEl.textContent = monthlyEl.textContent;
+    if (confirmCapEl) confirmCapEl.textContent = monthlyCap;
+    if (confirmQuestionEl) confirmQuestionEl.textContent = '这次先问：' + question.focusLabel;
+    mask.style.display = 'block';
+  }
+  function hideConfirm() { mask.style.display = 'none'; pendingAction = null; }
+  if (cancelBtn) cancelBtn.addEventListener('click', hideConfirm);
+  if (mask) mask.addEventListener('click', function (e) { if (e.target === mask) hideConfirm(); });
+  if (okBtn) okBtn.addEventListener('click', function () {
+    var act = pendingAction;
+    hideConfirm();
+    if (act) act();
+  });
+
+  // ────────── Main analysis (operation=start) ──────────
+  async function runAnalysis(question) {
     if (startBtn) startBtn.disabled = true;
     if (rerunBtn) rerunBtn.disabled = true;
-    box.innerHTML = '';
-    setStatus('<span class="ai-spinner"></span>' + '正在调用 AI，请耐心等待...');
 
-    var t0 = Date.now();
-    var full = '';
+    // Remove reflection box but keep existing dialogue content visible until success.
+    var rb = document.getElementById('ai-reflection-box');
+    if (rb && rb.parentNode) rb.parentNode.removeChild(rb);
+
+    // Remove any stale separator from a prior interrupted run.
+    var oldSep = document.getElementById('ai-reanalyze-separator');
+    if (oldSep && oldSep.parentNode) oldSep.parentNode.removeChild(oldSep);
+
+    // If there's already content, add a visual separator so the user can see the split.
+    var hasExistingContent = dialogueEl.children.length > 0
+      && !dialogueEl.querySelector('#ai-result-box');
+    if (hasExistingContent) {
+      var sep = document.createElement('div');
+      sep.id = 'ai-reanalyze-separator';
+      sep.className = 'ai-reanalyze-separator';
+      sep.textContent = '── 正在重新分析 ──';
+      dialogueEl.appendChild(sep);
+    }
+
+    appendBubble('student', '我的提问方向：' + question.focusLabel, question.note);
+    var tutorBody = appendBubble('tutor', '🤖 AI 教练', '');
+    setStatus('<span class="ai-spinner"></span>正在调用 AI，请耐心等待...');
+
+    var body = new URLSearchParams();
+    body.set('operation', 'start');
+    body.set('questionFocus', question.focus);
+    body.set('studentNote', question.note);
+    if (CSRF) body.set('csrfToken', CSRF);
+
     var errored = false;
+    var completed = false;
+    var full = '';
     try {
-      var body = new URLSearchParams();
-      body.set('operation', 'start');
-      if (CSRF) body.set('csrfToken', CSRF);
-
       var resp = await fetch(window.location.pathname, {
-        method: 'POST',
-        credentials: 'same-origin',
+        method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),
       });
@@ -191,77 +619,236 @@
       if (!resp.ok || !resp.body) {
         var msg = '';
         try { var j = await resp.json(); msg = j.error || j.message || ''; } catch (e) { msg = resp.statusText; }
-        box.innerHTML = '<span style="color:#c0392b;">出错了：' + msg + '</span>';
-        setStatus('');
-        errored = true;
-        return;
+        showError(msg);
+        tutorBody.innerHTML = '<span style="color:#c0392b;">出错了：' + msg + '</span>';
+        setStatus(''); errored = true; return;
       }
 
-      // Once first byte arrives, switch status to "receiving"
-      setStatus('<span class="ai-spinner"></span>' + '正在接收 AI 回复...');
-
-      var reader = resp.body.getReader();
-      var decoder = new TextDecoder('utf-8');
-      var buf = '';
-      while (true) {
-        var r = await reader.read();
-        if (r.done) break;
-        buf += decoder.decode(r.value, { stream: true });
-        var parts = buf.split('\n\n');
-        buf = parts.pop();
-        for (var i = 0; i < parts.length; i++) {
-          var line = parts[i].trim();
-          if (!line.startsWith('data:')) continue;
-          var data = line.slice(5).trim();
-          if (!data) continue;
-          try {
-            var ev = JSON.parse(data);
-            if (ev.type === 'chunk') {
-              full += ev.content;
-              box.innerHTML = renderInline(full);
-            } else if (ev.type === 'done') {
-              if (quotaEl && typeof ev.remaining === 'number') quotaEl.textContent = ev.remaining;
-              var secs = Math.round(ev.durationMs / 100) / 10;
-              setStatus('分析完成，耗时 ' + secs + ' 秒');
-              // Swap initial "开始分析" for "重新分析" + "清除分析"
-              if (startBtn) renderActionButtons(secs);
-              else if (rerunBtn) rerunBtn.disabled = false;
-            } else if (ev.type === 'error') {
-              errored = true;
-              box.innerHTML += '\n\n<span style="color:#c0392b;">出错了：' + ev.error + '</span>';
-              setStatus('');
-            }
-          } catch (e) { /* ignore */ }
+      setStatus('<span class="ai-spinner"></span>正在接收 AI 回复...');
+      await streamInto(resp, tutorBody, function (ev) {
+        if (ev.type === 'chunk') {
+          full += ev.content;
+          tutorBody.innerHTML = renderInline(full);
+        } else if (ev.type === 'done') {
+          completed = true;
+          if (balanceEl && typeof ev.balance === 'number') balanceEl.textContent = ev.balance;
+          if (monthlyEl && typeof ev.monthlyUsed === 'number') monthlyEl.textContent = ev.monthlyUsed;
+          var secs = Math.round(ev.durationMs / 100) / 10;
+          if (ev.interrupted) {
+            appendInterruptedWarning(tutorBody, 'main');
+            setStatus('AI 回复可能中断，已退回本次扣除的积分。可以点击“重新生成此次回复”。');
+            if (startBtn) startBtn.disabled = false;
+            if (rerunBtn) rerunBtn.disabled = false;
+            return;
+          }
+          setStatus('分析完成，耗时 ' + secs + ' 秒');
+          // Reload page so reflection box + correct controls render from server
+          setTimeout(function () { window.location.reload(); }, 800);
+        } else if (ev.type === 'error') {
+          errored = true;
+          showError(ev.error);
+          tutorBody.innerHTML += '\n\n<span style="color:#c0392b;">出错了：' + ev.error + '</span>';
+          setStatus('');
         }
-      }
+      });
     } catch (e) {
       errored = true;
-      box.innerHTML += '\n\n<span style="color:#c0392b;">网络出错：' + e.message + '</span>';
+      tutorBody.innerHTML += '\n\n<span style="color:#c0392b;">网络出错：' + e.message + '</span>';
       setStatus('');
     } finally {
-      if (startBtn && !errored) startBtn.style.display = 'none';
+      if (!completed && !errored && full.trim()) {
+        appendInterruptedWarning(tutorBody, 'main');
+        setStatus('AI 回复可能中断，可以点击“重新生成此次回复”。');
+      }
       if (startBtn && errored) startBtn.disabled = false;
       if (rerunBtn) rerunBtn.disabled = false;
     }
   }
 
-  function renderActionButtons(secs) {
-    controls.innerHTML =
-      '<button id="ai-rerun" class="rounded button" type="button">重新分析</button>' +
-      '<form method="post" action="" style="display:inline; margin-left:4px;">' +
-        '<input type="hidden" name="csrfToken" value="' + CSRF + '">' +
-        '<input type="hidden" name="operation" value="clear">' +
-        '<button class="rounded button text-maroon" type="submit" ' +
-          'onclick="return confirm(\'确定清除已有的 AI 分析吗？此操作不会返还配额。\')">清除分析</button>' +
-      '</form>' +
-      '<span class="ai-meta" style="color:#888; margin-left:8px;">分析完成，耗时 ' + secs + ' 秒</span>' +
-      '<span id="ai-status" style="color:#888; margin-left:8px;"></span>';
-    document.getElementById('ai-rerun').addEventListener('click', run);
+  // ────────── Reflection submit (operation=reflect) ──────────
+  async function runReflection() {
+    var ta = document.getElementById('reflection-text');
+    var btn = document.getElementById('reflection-submit');
+    var rstatus = document.getElementById('reflection-status');
+    var text = (ta.value || '').trim();
+    if (!text) { alert('请先写一点你的想法'); return; }
+    if (text.length > 500) { alert('字数不要超过 500 字'); return; }
+
+    btn.disabled = true;
+    ta.disabled = true;
+    rstatus.innerHTML = '<span class="ai-spinner"></span>发送中...';
+
+    // Add student bubble immediately
+    appendBubble('student', '👦 你的想法', text);
+    // Add empty tutor bubble for streaming
+    var tutorBody = appendBubble('tutor', '🤖 AI 教练', '');
+
+    var body = new URLSearchParams();
+    body.set('operation', 'reflect');
+    body.set('reflection', text);
+    if (CSRF) body.set('csrfToken', CSRF);
+
+    var full = '';
+    var completed = false;
+    try {
+      var resp = await fetch(window.location.pathname, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (!resp.ok || !resp.body) {
+        var msg = '';
+        try { var j = await resp.json(); msg = j.error || ''; } catch (e) { msg = resp.statusText; }
+        tutorBody.innerHTML = '<span style="color:#c0392b;">出错了：' + msg + '</span>';
+        rstatus.innerHTML = '';
+        btn.disabled = false; ta.disabled = false;
+        return;
+      }
+      rstatus.innerHTML = '<span class="ai-spinner"></span>正在接收 AI 回复...';
+      await streamInto(resp, tutorBody, function (ev) {
+        if (ev.type === 'chunk') {
+          full += ev.content;
+          tutorBody.innerHTML = renderInline(full);
+        } else if (ev.type === 'done') {
+          completed = true;
+          if (ev.interrupted) {
+            appendInterruptedWarning(tutorBody, 'reflection');
+            rstatus.innerHTML = 'AI 回复可能中断，可以重新生成此次回复。';
+            btn.disabled = false;
+            return;
+          }
+          rstatus.innerHTML = '回复完成 ✓';
+          // Hide reflection input (one-shot per analysis)
+          var rb = document.getElementById('ai-reflection-box');
+          if (rb) rb.style.display = 'none';
+        } else if (ev.type === 'error') {
+          tutorBody.innerHTML += '\n<span style="color:#c0392b;">出错了：' + ev.error + '</span>';
+          rstatus.innerHTML = '';
+          btn.disabled = false; ta.disabled = false;
+        }
+      });
+    } catch (e) {
+      tutorBody.innerHTML += '\n<span style="color:#c0392b;">网络出错：' + e.message + '</span>';
+      rstatus.innerHTML = '';
+      btn.disabled = false; ta.disabled = false;
+    } finally {
+      if (!completed && full.trim()) {
+        appendInterruptedWarning(tutorBody, 'reflection');
+        rstatus.innerHTML = 'AI 回复可能中断，可以重新生成此次回复。';
+        btn.disabled = false;
+      }
+    }
   }
 
-  if (startBtn) startBtn.addEventListener('click', run);
-  if (rerunBtn) rerunBtn.addEventListener('click', run);
+  async function runRegenerateReflection() {
+    var btn = this;
+    if (btn) btn.disabled = true;
+    removeInterruptedTutorBubbles();
+    var tutorBody = appendBubble('tutor', '🤖 AI 教练', '');
+    setStatus('<span class="ai-spinner"></span>正在重新生成回复...');
 
+    var body = new URLSearchParams();
+    body.set('operation', 'regenerateReflect');
+    if (CSRF) body.set('csrfToken', CSRF);
+
+    var full = '';
+    var completed = false;
+    try {
+      var resp = await fetch(window.location.pathname, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (!resp.ok || !resp.body) {
+        var msg = '';
+        try { var j = await resp.json(); msg = j.error || ''; } catch (e) { msg = resp.statusText; }
+        tutorBody.innerHTML = '<span style="color:#c0392b;">出错了：' + msg + '</span>';
+        setStatus('');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      await streamInto(resp, tutorBody, function (ev) {
+        if (ev.type === 'chunk') {
+          full += ev.content;
+          tutorBody.innerHTML = renderInline(full);
+        } else if (ev.type === 'done') {
+          completed = true;
+          if (ev.interrupted) {
+            appendInterruptedWarning(tutorBody, 'reflection');
+            setStatus('AI 回复可能中断，可以再次重新生成。');
+            return;
+          }
+          setStatus('回复完成 ✓');
+          setTimeout(function () { window.location.reload(); }, 800);
+        } else if (ev.type === 'error') {
+          tutorBody.innerHTML += '\n<span style="color:#c0392b;">出错了：' + ev.error + '</span>';
+          setStatus('');
+          if (btn) btn.disabled = false;
+        }
+      });
+    } catch (e) {
+      tutorBody.innerHTML += '\n<span style="color:#c0392b;">网络出错：' + e.message + '</span>';
+      setStatus('');
+      if (btn) btn.disabled = false;
+    } finally {
+      if (!completed && full.trim()) {
+        appendInterruptedWarning(tutorBody, 'reflection');
+        setStatus('AI 回复可能中断，可以重新生成此次回复。');
+      }
+    }
+  }
+
+  // ────────── Shared SSE stream parser ──────────
+  async function streamInto(resp, _bodyEl, onEvent) {
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder('utf-8');
+    var buf = '';
+    while (true) {
+      var r = await reader.read();
+      if (r.done) break;
+      buf += decoder.decode(r.value, { stream: true });
+      var parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (var i = 0; i < parts.length; i++) {
+        var line = parts[i].trim();
+        if (!line.startsWith('data:')) continue;
+        var data = line.slice(5).trim();
+        if (!data) continue;
+        try { onEvent(JSON.parse(data)); } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
+  // ────────── Wire up buttons via the confirm modal ──────────
+  function prepareAnalysis() {
+    var trigger = this || startBtn || rerunBtn;
+    if (trigger && trigger.getAttribute('data-usage-can-use') === 'false') {
+      showError(trigger.getAttribute('data-usage-reason') || '积分余额不足，去 AC 几道新题获得积分吧！');
+      return;
+    }
+    if (trigger && trigger.getAttribute('data-submission-passed') === 'false') {
+      showError(trigger.getAttribute('data-submission-reason') || '请先多提交几次，真正卡住后再来找 AI 教练。');
+      return;
+    }
+    var question = readQuestion();
+    if (question) showConfirm(question);
+  }
+  if (studentNoteEl && noteCountEl) {
+    var updateCount = function () { noteCountEl.textContent = studentNoteEl.value.length; };
+    studentNoteEl.addEventListener('input', updateCount);
+    updateCount();
+  }
+  if (startBtn) startBtn.addEventListener('click', prepareAnalysis);
+  if (rerunBtn) rerunBtn.addEventListener('click', prepareAnalysis);
+  var regenMainBtns = document.querySelectorAll('.ai-regenerate-main');
+  for (var i = 0; i < regenMainBtns.length; i++) regenMainBtns[i].addEventListener('click', prepareAnalysis);
+  var regenReflectionBtns = document.querySelectorAll('.ai-regenerate-reflection');
+  for (var j = 0; j < regenReflectionBtns.length; j++) regenReflectionBtns[j].addEventListener('click', runRegenerateReflection);
+
+  var reflectionBtn = document.getElementById('reflection-submit');
+  if (reflectionBtn) reflectionBtn.addEventListener('click', runReflection);
+
+  // ────────── Copy-prompt button (unchanged) ──────────
   var copyBtn = document.getElementById('ai-copy-prompt');
   if (copyBtn) {
     copyBtn.addEventListener('click', function () {

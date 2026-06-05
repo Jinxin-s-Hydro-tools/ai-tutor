@@ -1,0 +1,250 @@
+{% extends "domain_base.html" %}
+{% import "components/paginator.html" as paginator with context %}
+{% block domain_content %}
+<div class="section ai-domain-intro">
+  <div class="section__header">
+    <h1 class="section__title">{{ domain.name }}：{{ _('AI 刷题管理') }}</h1>
+  </div>
+  <div class="section__body">
+    <p style="margin: 0;">
+      本月基础可用次数为 <strong>{{ baseCap }}</strong> 次/人。只有开启状态的用户才能在当前域使用 AI 刷题建议。
+    </p>
+    <p style="margin: 6px 0 0; color: #66737f; font-size: 13px;">
+      追加可用次数只提高当前域本月调用上限，不改变用户本域积分；用户积分不足时仍无法发起新的分析。
+    </p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header ai-domain-header">
+    <div>
+      <h1 class="section__title">AI 接口配置</h1>
+      <span class="ai-summary">
+        当前模型：{{ providerLabel or '未配置' }} · API Key：{% if apiKeyConfigured %}已填写{% else %}未填写{% endif %}
+      </span>
+    </div>
+  </div>
+  <div class="section__body">
+    <form method="post" class="ai-config-form">
+      <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+      <input type="hidden" name="operation" value="saveConfig">
+      <label>
+        <span>提供方 / 模型</span>
+        <select class="select" name="provider" id="ai-provider-select">
+          {% set currentProvider = domainAiConfig.provider or 'deepseek-v4-flash' %}
+          {% for key, label in providerRange %}
+            <option value="{{ key }}" {% if currentProvider == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="ai-custom-field">
+        <span>自定义 Base URL</span>
+        <input class="textbox" name="customBaseUrl" value="{{ domainAiConfig.customBaseUrl or '' }}" placeholder="https://api.openai.com/v1">
+      </label>
+      <label class="ai-custom-field">
+        <span>自定义模型名称</span>
+        <input class="textbox" name="customModel" value="{{ domainAiConfig.customModel or '' }}" placeholder="gpt-4o-mini">
+      </label>
+      <label>
+        <span>API Key</span>
+        <input class="textbox" type="password" name="apiKey" value="" autocomplete="new-password"
+               placeholder="{% if apiKeyConfigured %}留空则保持原 Key 不变{% else %}填写当前域使用的 API Key{% endif %}">
+      </label>
+      {% if apiKeyConfigured %}
+        <label class="ai-checkbox">
+          <input type="checkbox" name="clearApiKey" value="true">
+          <span>清空当前域 API Key</span>
+        </label>
+      {% endif %}
+      <div class="ai-config-actions">
+        <button class="rounded primary button" type="submit">保存接口配置</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header ai-domain-header">
+    <div>
+      <h1 class="section__title">用户使用权限与用量</h1>
+      <span class="ai-summary">
+        {{ month }} · 共 {{ rowCount }} 名用户
+        {% if q or role or state %}（已按条件筛选）{% endif %}
+      </span>
+    </div>
+    <div class="ai-domain-actions">
+      <a class="rounded button" href="{{ url('ai_tutor_domain_batch') }}">
+        <span class="icon icon-import"></span> 批量设置
+      </a>
+      <a class="rounded button" href="{{ url('ai_tutor_domain_records') }}">
+        <span class="icon icon-flag"></span> 用户使用记录
+      </a>
+    </div>
+  </div>
+  <div class="ai-filter-bar">
+    <form method="get" name="filter-form" class="ai-search-form">
+      <input type="text" class="inline compact textbox ai-search-input" name="q" value="{{ q }}" placeholder="搜索用户名" maxlength="100">
+      <select class="inline compact select ai-filter-select" name="role">
+        <option value="">全部角色</option>
+        {% for option in roles %}
+          <option value="{{ option._id }}" {% if role == option._id %}selected{% endif %}>{{ option._id }}</option>
+        {% endfor %}
+      </select>
+      <select class="inline compact select ai-filter-select ai-state-select" name="state">
+        <option value="">全部状态</option>
+        <option value="enabled" {% if state == 'enabled' %}selected{% endif %}>已开启</option>
+        <option value="disabled" {% if state == 'disabled' %}selected{% endif %}>未开启</option>
+      </select>
+      <button class="button ai-filter-submit" type="submit">筛选</button>
+      {% if q or role or state %}
+        <a class="button ai-filter-clear" href="?">清除</a>
+      {% endif %}
+    </form>
+  </div>
+  <div class="section__body no-padding">
+    {% if rows|length == 0 %}
+      <div class="ai-empty">
+        {% if q or role or state %}
+          没有找到符合筛选条件的用户。
+        {% else %}
+          当前域还没有可管理的用户。
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="ai-table-wrap">
+        <table class="data-table ai-domain-table">
+          <thead>
+            <tr>
+              <th class="ai-col-student">用户</th>
+              <th class="ai-col-role">角色</th>
+              <th class="col--center ai-col-status">功能状态</th>
+              <th class="col--center ai-col-usage">本月调用 / 可用上限</th>
+              <th class="col--center ai-col-balance">本域积分</th>
+              <th class="ai-col-action">次数管理</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <td class="ai-col-student">
+                  {{ user.render_inline(row.user, badge=false) }}
+                  <span class="text-gray">#{{ row.uid }}</span>
+                </td>
+                <td class="ai-col-role">{{ row.role }}</td>
+                <td class="col--center ai-col-status">
+                  <form method="post" class="ai-access-toggle">
+                    <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+                    <input type="hidden" name="operation" value="toggle">
+                    <input type="hidden" name="uid" value="{{ row.uid }}">
+                    <input type="hidden" name="enabled" value="{{ 'false' if row.enabled else 'true' }}">
+                    <input type="hidden" name="returnPage" value="{{ page }}">
+                    <input type="hidden" name="returnQ" value="{{ q }}">
+                    <input type="hidden" name="returnRole" value="{{ role }}">
+                    <input type="hidden" name="returnState" value="{{ state }}">
+                    <button class="rounded button ai-compact-button{% if row.enabled %} primary{% endif %}" type="submit">
+                      {% if row.enabled %}已开启{% else %}未开启{% endif %}
+                    </button>
+                  </form>
+                </td>
+                <td class="col--center ai-col-usage">
+                  <strong>{{ row.calls }}</strong> / {{ row.cap }}
+                  {% if row.bonus > 0 %}
+                    <span class="ai-bonus">+{{ row.bonus }}</span>
+                  {% endif %}
+                  {% if row.lastAt %}
+                    <div class="ai-last">{{ datetimeSpan(row.lastAt, true)|safe }}</div>
+                  {% endif %}
+                </td>
+                <td class="col--center ai-col-balance"><strong>{{ row.balance }}</strong></td>
+                <td class="ai-col-action">
+                  <a class="rounded button ai-quota-link"
+                     href="{{ url('ai_tutor_domain_quota') }}?uid={{ row.uid }}&returnPage={{ page }}{% if q %}&returnQ={{ q|urlencode }}{% endif %}{% if role %}&returnRole={{ role|urlencode }}{% endif %}{% if state %}&returnState={{ state }}{% endif %}">
+                    <span class="icon icon-add"></span> 追加 / 记录
+                  </a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {{ paginator.render(page, pageCount, add_qs=qs) }}
+    {% endif %}
+  </div>
+</div>
+
+<style>
+  .ai-domain-intro .section__body { padding: 18px 20px; }
+  .ai-domain-header {
+    align-items: center; display: flex; gap: 12px; justify-content: space-between;
+    padding-bottom: 12px; padding-top: 14px;
+  }
+  .ai-domain-actions { align-items: center; display: inline-flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .ai-summary { color: #78828d; display: block; font-size: 13px; margin-top: 5px; }
+  .ai-filter-bar {
+    border-top: 1px solid #ebeff2; padding: 10px 15px; text-align: right;
+  }
+  .ai-search-form { align-items: center; display: inline-flex; gap: 4px; margin: 0; }
+  .ai-search-input {
+    margin: 0; width: 176px;
+  }
+  .ai-filter-select {
+    margin: 0; width: 112px;
+  }
+  .ai-state-select { width: 100px; }
+  .ai-filter-submit, .ai-filter-clear { margin: 0; }
+  .domain-ai-tutor table, .ai-domain-table { top: auto !important; }
+  .ai-table-wrap { overflow-x: auto; }
+  .ai-domain-table { min-width: 710px; }
+  .ai-domain-table th { white-space: nowrap; }
+  .ai-domain-table td { vertical-align: middle; }
+  .ai-domain-table .ai-col-student { padding-left: 6px; padding-right: 6px; width: 124px; }
+  .ai-domain-table .ai-col-role { padding-left: 6px; padding-right: 6px; width: 64px; }
+  .ai-domain-table .ai-col-status { padding-left: 6px; padding-right: 6px; width: 88px; }
+  .ai-domain-table .ai-col-usage { padding-left: 6px; padding-right: 6px; width: 130px; }
+  .ai-domain-table .ai-col-balance { padding-left: 6px; padding-right: 6px; width: 72px; }
+  .ai-domain-table .ai-col-action { padding-left: 6px; padding-right: 6px; width: 112px; }
+  .ai-access-toggle { margin: 0; }
+  .ai-compact-button, .ai-quota-link { padding-left: 10px; padding-right: 10px; }
+  .ai-quota-link { white-space: nowrap; }
+  .ai-bonus {
+    display: inline-block; margin-left: 4px; padding: 1px 5px;
+    color: #237343; background: #e7f6ec; border-radius: 4px; font-size: 12px;
+  }
+  .ai-last { color: #888; font-size: 12px; margin-top: 3px; }
+  .ai-empty { color: #888; padding: 32px 20px; text-align: center; }
+  .ai-config-form {
+    display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 880px;
+  }
+  .ai-config-form label { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+  .ai-config-form label > span { color: #52616f; font-size: 13px; }
+  .ai-config-form .textbox, .ai-config-form .select { margin: 0; width: 100%; }
+  .ai-checkbox {
+    align-items: center; flex-direction: row !important; gap: 8px !important;
+  }
+  .ai-checkbox input { margin: 0; }
+  .ai-config-actions { align-self: end; }
+  .pager { padding-bottom: 16px; }
+  @media screen and (max-width: 640px) {
+    .ai-filter-bar { text-align: left; }
+    .ai-domain-header { align-items: stretch; flex-direction: column; }
+    .ai-domain-actions { justify-content: flex-start; }
+    .ai-search-form { display: flex; flex-wrap: wrap; width: 100%; }
+    .ai-search-input { width: 100%; }
+    .ai-config-form { grid-template-columns: 1fr; }
+  }
+</style>
+<script>
+  (function () {
+    var select = document.getElementById('ai-provider-select');
+    if (!select) return;
+    var fields = Array.prototype.slice.call(document.querySelectorAll('.ai-custom-field'));
+    function syncCustomFields() {
+      fields.forEach(function (field) {
+        field.style.display = select.value === 'custom' ? 'flex' : 'none';
+      });
+    }
+    select.addEventListener('change', syncCustomFields);
+    syncCustomFields();
+  })();
+</script>
+{% endblock %}

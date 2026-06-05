@@ -1,0 +1,202 @@
+{% extends "domain_base.html" %}
+{% block domain_content %}
+<div class="section">
+  <div class="section__header ai-batch-header">
+    <div>
+      <h1 class="section__title">{{ domain.name }}：批量设置 AI 积分 / 可用上限</h1>
+      <span class="ai-batch-subtitle">所有数值都是增量；负数最多扣到 0，不会产生负数。</span>
+    </div>
+    <a class="rounded button" href="{{ url('ai_tutor_domain_manage') }}">返回 AI 刷题管理</a>
+  </div>
+  <div class="section__body">
+    {% if messages and messages|length %}
+      <pre class="ai-batch-messages">{% for message in messages %}{{ message }}
+{% endfor %}</pre>
+    {% endif %}
+    <div class="ai-batch-grid">
+      <form method="post" class="ai-batch-card">
+        <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+        <h2>文本导入</h2>
+        <p>逗号或 Tab 分隔。域可以填写域 ID 或域名称。</p>
+        <label>
+          <span>导入模式</span>
+          <select name="textMode">
+            <option value="credit" {% if textMode == 'credit' %}selected{% endif %}>用户名，域，域内积分</option>
+            <option value="quota" {% if textMode == 'quota' %}selected{% endif %}>用户名，域，域内本月可用上限</option>
+            <option value="both" {% if textMode == 'both' %}selected{% endif %}>用户名，域，域内积分，域内本月可用上限</option>
+          </select>
+        </label>
+        <label>
+          <span>导入内容</span>
+          <textarea name="importText" rows="9" placeholder="alice,objective,1,3&#10;bob,objective,-2,-1">{{ importText }}</textarea>
+        </label>
+        <label>
+          <span>操作说明</span>
+          <input type="text" name="remark" value="{{ remark }}" maxlength="200" placeholder="例如：课堂统一调整">
+        </label>
+        <div class="ai-batch-actions">
+          <button class="rounded button" type="submit" name="operation" value="textPreview">预览</button>
+          <button class="rounded primary button" type="submit" name="operation" value="textImport"
+                  {% if previewType != 'text' or not canImport %}disabled{% endif %}>
+            确认导入
+          </button>
+        </div>
+      </form>
+
+      <form method="post" class="ai-batch-card">
+        <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+        <h2>按小组批量调整</h2>
+        <p>选择当前域内小组，再选择调整积分或本月可用上限。</p>
+        <label>
+          <span>小组</span>
+          <select name="groupName">
+            <option value="">请选择小组</option>
+            {% for group in groups %}
+              <option value="{{ group.name }}" {% if groupName == group.name %}selected{% endif %}>
+                {{ group.name }}（{{ group.uids|length }} 人）
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>调整类型</span>
+          <select name="groupAction">
+            <option value="credit" {% if groupAction == 'credit' %}selected{% endif %}>改变域内积分</option>
+            <option value="quota" {% if groupAction == 'quota' %}selected{% endif %}>改变域内本月可用上限</option>
+          </select>
+        </label>
+        <label>
+          <span>增量</span>
+          <input type="number" name="groupAmount" value="{{ groupAmount }}" min="-1000" max="1000" required>
+        </label>
+        <label>
+          <span>操作说明</span>
+          <input type="text" name="remark" value="{{ remark }}" maxlength="200" placeholder="例如：小组统一奖励">
+        </label>
+        <div class="ai-batch-actions">
+          <button class="rounded button" type="submit" name="operation" value="groupPreview">预览</button>
+          <button class="rounded primary button" type="submit" name="operation" value="groupImport"
+                  {% if previewType != 'group' or not canImport %}disabled{% endif %}>
+            确认导入
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% if previewRows and previewRows|length %}
+  <div class="section">
+    <div class="section__header">
+      <h1 class="section__title">预览结果</h1>
+      <span class="ai-batch-subtitle">共 {{ previewRows|length }} 行。确认导入前请检查无误。</span>
+    </div>
+    <div class="section__body no-padding">
+      <div class="ai-table-wrap">
+        <table class="data-table ai-preview-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>用户</th>
+              <th>域</th>
+              <th class="col--center">积分变化</th>
+              <th class="col--center">积分结果</th>
+              <th class="col--center">可用上限变化</th>
+              <th class="col--center">可用上限结果</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in previewRows %}
+              <tr class="{% if not row.ok %}ai-row-error{% endif %}">
+                <td>{{ row.lineNum|default(loop.index) }}</td>
+                <td>
+                  {{ row.username or row.uname }}
+                  {% if row.uid %}<span class="text-gray">#{{ row.uid }}</span>{% endif %}
+                </td>
+                <td>{{ row.domainId }}</td>
+                <td class="col--center">
+                  {% if row.creditDelta is defined and row.creditDelta != null %}
+                    {{ row.creditDelta }}{% if row.creditEffective is defined and row.creditEffective != row.creditDelta %}<div class="text-gray">实际 {{ row.creditEffective }}</div>{% endif %}
+                  {% endif %}
+                </td>
+                <td class="col--center">
+                  {% if row.creditBefore is defined %}{{ row.creditBefore }} -> {{ row.creditAfter }}{% endif %}
+                </td>
+                <td class="col--center">
+                  {% if row.quotaDelta is defined and row.quotaDelta != null %}
+                    {{ row.quotaDelta }}{% if row.quotaEffective is defined and row.quotaEffective != row.quotaDelta %}<div class="text-gray">实际 {{ row.quotaEffective }}</div>{% endif %}
+                  {% endif %}
+                </td>
+                <td class="col--center">
+                  {% if row.quotaBefore is defined %}+{{ row.quotaBefore }} -> +{{ row.quotaAfter }}{% endif %}
+                </td>
+                <td>
+                  {% if row.ok %}
+                    <span class="ai-ok">OK</span>
+                  {% else %}
+                    <span class="ai-error">{{ row.errors|join('；') }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<style>
+  .ai-batch-header {
+    align-items: center; display: flex; gap: 16px; justify-content: space-between;
+  }
+  .ai-batch-subtitle { color: #78828d; display: block; font-size: 13px; margin-top: 5px; }
+  .ai-batch-messages {
+    background: #f7f9fa; border: 1px solid #dfe6ec; border-radius: 6px;
+    font-size: 13px; line-height: 1.6; margin: 0 0 16px; max-height: 220px;
+    overflow: auto; padding: 10px 12px; white-space: pre-wrap;
+  }
+  .ai-batch-grid {
+    display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ai-batch-card {
+    background: #f8fafb; border: 1px solid #e1e7ec; border-radius: 6px;
+    margin: 0; padding: 16px;
+  }
+  .ai-batch-card h2 { font-size: 16px; margin: 0 0 5px; }
+  .ai-batch-card p { color: #6b7782; font-size: 13px; margin: 0 0 12px; }
+  .ai-batch-card label { display: block; margin: 0 0 12px; }
+  .ai-batch-card label span {
+    color: #33424f; display: block; font-weight: 500; margin-bottom: 6px;
+  }
+  .ai-batch-card input, .ai-batch-card select, .ai-batch-card textarea {
+    box-sizing: border-box; margin: 0; width: 100%;
+  }
+  .ai-batch-card textarea { font-family: Consolas, Menlo, monospace; resize: vertical; }
+  .ai-batch-actions {
+    align-items: center; border-top: 1px solid #e1e7ec; display: flex; gap: 8px;
+    justify-content: flex-end; margin-top: 14px; padding-top: 14px;
+  }
+  .ai-batch-actions .button { margin: 0; }
+  .ai-table-wrap { overflow-x: auto; }
+  .ai-preview-table { min-width: 920px; top: auto !important; }
+  .ai-row-error { background: #fff5f5; }
+  .ai-ok { color: #237343; font-weight: 600; }
+  .ai-error { color: #c0392b; }
+  @media screen and (max-width: 800px) {
+    .ai-batch-header { align-items: stretch; flex-direction: column; }
+    .ai-batch-grid { grid-template-columns: 1fr; }
+  }
+</style>
+<script>
+  (function () {
+    function markAiTutorMenu() {
+      var link = document.querySelector('#menu-item-ai_tutor_domain_manage > .menu__link');
+      if (link) link.classList.add('active');
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', markAiTutorMenu);
+    else markAiTutorMenu();
+  })();
+</script>
+{% endblock %}

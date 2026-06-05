@@ -1,0 +1,227 @@
+{% extends "domain_base.html" %}
+{% import "components/paginator.html" as paginator with context %}
+{% block domain_content %}
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">{{ domain.name }}：{{ _('用户使用记录') }} <small style="color:#888; font-weight:normal;">— {{ month }}</small></h1>
+  </div>
+  <div class="section__body">
+    <p>
+      📊 本月总调用 <strong>{{ totalCalls }}</strong> 次，
+      涉及 <strong>{{ distinctUserCount }}</strong> 个学生，
+      当前域月度基础上限 <strong>{{ monthlyCap }}</strong> 次/人。
+    </p>
+    <p style="color:#666; font-size: 0.9em;">
+      💡 重点关注的信号：
+      <code>调用次数 ≥ 月度上限的 80%</code>、<code>多次 AI 后没再提交</code>、<code>调用间隔过短</code>。
+    </p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">{{ _('本月各学生用量') }}</h1>
+  </div>
+  <div class="section__body no-padding">
+    {% if byUser|length == 0 %}
+      <p style="padding: 20px; color:#888;">本月还没有学生调用过 AI 教练。</p>
+    {% else %}
+    <table class="data-table">
+      <colgroup>
+        <col width="40">
+        <col>
+        <col width="120">
+        <col width="100">
+        <col width="100">
+        <col width="120">
+        <col width="160">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>{{ _('学生') }}</th>
+          <th class="col--center">本月调用 / 上限</th>
+          <th class="col--center">合计积分</th>
+          <th class="col--center">累计获得</th>
+          <th class="col--center">平均耗时</th>
+          <th class="col--center">最近一次</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in byUser %}
+        {% set ratio = row.usageRatio %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>
+            {% if row.user %}
+              <a href="{{ url('user_detail', uid=row.uid) }}">{{ row.user.uname or row.user.uname or ('uid='+row.uid|string) }}</a>
+            {% else %}
+              uid={{ row.uid }}
+            {% endif %}
+          </td>
+          <td class="col--center">
+            <strong style="color: {% if ratio >= 0.8 %}#c0392b{% elif ratio >= 0.5 %}#e67e22{% else %}#2c3e50{% endif %};">
+              {{ row.calls }}
+            </strong> / {{ row.cap }}
+            {% if ratio >= 0.8 %}<span title="本月用量过半，已接近上限">⚠️</span>{% endif %}
+          </td>
+          <td class="col--center">{{ row.balance }}</td>
+          <td class="col--center">{{ row.totalEarned }}</td>
+          <td class="col--center">{{ (row.avgDurationMs / 1000)|round(1) }} s</td>
+          <td class="col--center" style="color:#888; font-size: 0.9em;">
+            {{ datetimeSpan(row.lastAt, true)|safe if row.lastAt else '-' }}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header ai-admin-history-header">
+    <div>
+      <h1 class="section__title">{{ _('AI 调用记录') }}</h1>
+      <span class="ai-admin-subtitle">
+        共 {{ recentCount }} 条{% if q %}，已按用户名 "{{ q }}" 搜索{% endif %}
+      </span>
+    </div>
+    <form method="get" class="ai-admin-search">
+      <input class="textbox inline compact" type="text" name="q" value="{{ q }}" placeholder="搜索用户名" maxlength="100">
+      <button class="button" type="submit">搜索</button>
+      {% if q %}
+        <a class="button" href="{{ url('ai_tutor_domain_records') }}">清除</a>
+      {% endif %}
+    </form>
+  </div>
+  <div class="section__body no-padding">
+    {% if recent|length == 0 %}
+      <p style="padding: 20px; color:#888;">
+        {% if q and matchedUserCount == 0 %}
+          没有找到匹配该用户名的用户。
+        {% elif q %}
+          没有找到该用户的 AI 调用记录。
+        {% else %}
+          暂无记录。
+        {% endif %}
+      </p>
+    {% else %}
+    <table class="data-table ai-records-table">
+      <colgroup>
+        <col width="140">
+        <col width="140">
+        <col width="220">
+        <col width="160">
+        <col width="80">
+        <col width="150">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>{{ _('时间') }}</th>
+          <th>{{ _('学生') }}</th>
+          <th>{{ _('题号') }}</th>
+          <th>{{ _('模型') }}</th>
+          <th>{{ _('耗时') }}</th>
+          <th>{{ _('查看') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in recent %}
+        <tr>
+          <td>{{ datetimeSpan(r.at, true)|safe }}</td>
+          <td>
+            {% if r.user %}
+              <a href="{{ url('user_detail', uid=r.uid) }}">{{ r.user.uname }}</a>
+            {% else %}
+              uid={{ r.uid }}
+            {% endif %}
+          </td>
+          <td class="ai-problem-cell">
+            {% if r.pid %}
+              {% set problemKey = r.domainId + ':' + r.pid %}
+              {% if problems[problemKey] %}
+                <a class="typo-a" target="_blank" href="/d/{{ r.domainId }}/p/{{ r.pid }}">{{ problems[problemKey].display }}</a>
+              {% else %}
+                <a class="typo-a" target="_blank" href="/d/{{ r.domainId }}/p/{{ r.pid }}">{{ r.pid }}</a>
+              {% endif %}
+            {% else %}
+              <span class="text-gray">-</span>
+            {% endif %}
+          </td>
+          <td style="color:#666; font-size: 0.85em; font-family: monospace;">{{ r.model }}</td>
+          <td>{{ (r.durationMs / 1000)|round(1) }} s</td>
+          <td>
+            <a class="rounded button" target="_blank"
+               href="/d/{{ r.domainId }}/record/{{ r.rid }}/ai">查看</a>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {{ paginator.render(recentPage, recentPageCount, add_qs=('q=' + q|urlencode) if q else '') }}
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">💡 {{ _('使用建议') }}</h1>
+  </div>
+  <div class="section__body typo">
+    <p>本面板让你看到每个学生<strong>本月怎么用 AI 教练</strong>。健康的使用模式应该是：</p>
+    <ul>
+      <li>调用 / AC 比例不高于 <strong>1:2</strong>（每用 1 次 AI，应该至少 AC 2 题以上）</li>
+      <li>单次提交后到调用 AI 的间隔 <strong>≥ 5 分钟</strong>（说明孩子先尝试了）</li>
+      <li>AI 调用之后 1 小时内有 <strong>新的提交</strong>（说明在落实 AI 给的建议）</li>
+    </ul>
+    <p>如果发现某个学生连续点 ⚠️，建议：</p>
+    <ul>
+      <li>点 "查看" 看看 AI 的回复是否真正帮助到了他</li>
+      <li>看看他的最近提交 — 是否每次提交后都点 AI，而不是先自己改</li>
+      <li>必要时口头提醒，或回到当前域的 AI 刷题管理页调整用户权限与可用次数</li>
+    </ul>
+  </div>
+</div>
+<style>
+  .ai-admin-history-header {
+    align-items: center; display: flex; gap: 12px; justify-content: space-between;
+  }
+  .ai-admin-subtitle {
+    color: #78828d; display: block; font-size: 13px; margin-top: 5px;
+  }
+  .ai-admin-search {
+    align-items: center; display: inline-flex; gap: 6px; margin: 0;
+  }
+  .ai-admin-search .textbox { margin: 0; width: 180px; }
+  .ai-records-table {
+    table-layout: fixed; width: 890px !important; max-width: 100%;
+  }
+  .ai-records-table th:nth-child(1),
+  .ai-records-table td:nth-child(1) { width: 140px; max-width: 140px; }
+  .ai-records-table th:nth-child(2),
+  .ai-records-table td:nth-child(2) { width: 140px; max-width: 140px; }
+  .ai-records-table th:nth-child(6),
+  .ai-records-table td:nth-child(6) { width: 150px; max-width: 150px; }
+  .ai-problem-cell {
+    max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .manage-ai-tutor .data-table { top: auto !important; }
+  .pager { padding-bottom: 16px; }
+  @media screen and (max-width: 640px) {
+    .ai-admin-history-header { align-items: stretch; flex-direction: column; }
+    .ai-admin-search { flex-wrap: wrap; }
+    .ai-admin-search .textbox { width: 100%; }
+  }
+</style>
+<script>
+  (function () {
+    function markAiTutorMenu() {
+      var link = document.querySelector('#menu-item-ai_tutor_domain_manage > .menu__link');
+      if (link) link.classList.add('active');
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', markAiTutorMenu);
+    else markAiTutorMenu();
+  })();
+</script>
+{% endblock %}

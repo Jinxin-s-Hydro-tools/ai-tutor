@@ -1,0 +1,316 @@
+{% extends "domain_base.html" %}
+{% import "components/paginator.html" as paginator with context %}
+{% block domain_content %}
+<div class="section">
+  <div class="section__header ai-quota-header">
+    <div>
+      <h1 class="section__title">追加 AI 可用次数</h1>
+      <span class="ai-quota-subtitle">
+        {{ user.render_inline(student, badge=false) }} <span class="text-gray">#{{ uid }}</span>
+      </span>
+    </div>
+    <a class="rounded button"
+       href="{{ url('ai_tutor_domain_manage') }}?page={{ returnPage }}{% if returnQ %}&q={{ returnQ|urlencode }}{% endif %}{% if returnRole %}&role={{ returnRole|urlencode }}{% endif %}{% if returnState %}&state={{ returnState }}{% endif %}">
+      返回学生列表
+    </a>
+  </div>
+  <div class="section__body">
+    <div class="ai-quota-stats">
+      <div class="ai-stat">
+        <span>月份</span>
+        <strong>{{ month }}</strong>
+      </div>
+      <div class="ai-stat">
+        <span>本月已调用</span>
+        <strong>{{ calls }}</strong>
+      </div>
+      <div class="ai-stat">
+        <span>基础上限</span>
+        <strong>{{ baseCap }}</strong>
+      </div>
+      <div class="ai-stat ai-stat-accent">
+        <span>已追加 / 当前上限</span>
+        <strong>+{{ bonus }} / {{ cap }}</strong>
+      </div>
+      <div class="ai-stat ai-stat-credit">
+        <span>本域积分</span>
+        <strong>{{ balance }}</strong>
+      </div>
+    </div>
+    <p class="ai-quota-note">
+      追加仅提高当前域当前月份的调用上限，不增加学生本域积分。每次操作都会记录操作者、追加数值和说明。
+    </p>
+  </div>
+</div>
+
+<div class="section ai-quota-create-section">
+  <div class="section__header ai-quota-create-header">
+    <div>
+      <h1 class="section__title">新增追加记录</h1>
+      <span class="ai-quota-create-subtitle">本次追加只影响 {{ month }} 的 AI 可用次数</span>
+    </div>
+  </div>
+  <div class="section__body ai-quota-create-body">
+    <form method="post" class="ai-quota-form">
+      <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+      <input type="hidden" name="operation" value="grant">
+      <input type="hidden" name="uid" value="{{ uid }}">
+      <input type="hidden" name="returnPage" value="{{ returnPage }}">
+      <input type="hidden" name="returnQ" value="{{ returnQ }}">
+      <input type="hidden" name="returnRole" value="{{ returnRole }}">
+      <input type="hidden" name="returnState" value="{{ returnState }}">
+      <div class="ai-quota-form-grid">
+        <label class="ai-field ai-field-amount">
+          <span>追加次数</span>
+          <input type="number" name="amount" value="1" min="1" max="1000" required>
+          <em>当前上限：{{ cap }} 次</em>
+        </label>
+        <label class="ai-field ai-field-wide">
+          <span>追加说明 <small>必填，将显示在操作记录中</small></span>
+          <textarea name="remark" rows="4" maxlength="200" required
+                    placeholder="例如：学生本月参加补做训练，批准追加 5 次辅导机会。"></textarea>
+        </label>
+      </div>
+      <div class="ai-quota-form-actions">
+        <span>追加后会保留操作者、时间、月份和说明。</span>
+        <button class="rounded primary button" type="submit">确认追加并记录</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="section ai-credit-adjust-section">
+  <div class="section__header ai-quota-create-header">
+    <div>
+      <h1 class="section__title">积分修改</h1>
+      <span class="ai-quota-create-subtitle">正数为加分，负数为扣分；记录类型为手动</span>
+    </div>
+  </div>
+  <div class="section__body ai-quota-create-body">
+    <form method="post" class="ai-quota-form ai-credit-form">
+      <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+      <input type="hidden" name="operation" value="adjustCredit">
+      <input type="hidden" name="uid" value="{{ uid }}">
+      <input type="hidden" name="returnPage" value="{{ returnPage }}">
+      <input type="hidden" name="returnQ" value="{{ returnQ }}">
+      <input type="hidden" name="returnRole" value="{{ returnRole }}">
+      <input type="hidden" name="returnState" value="{{ returnState }}">
+      <div class="ai-quota-form-grid">
+        <label class="ai-field ai-field-amount">
+          <span>积分变动</span>
+          <input type="number" name="creditAmount" value="1" min="-1000" max="1000" required>
+          <em>当前本域积分：{{ balance }}</em>
+        </label>
+        <label class="ai-field ai-field-wide">
+          <span>修改说明 <small>必填，将显示在积分明细中</small></span>
+          <textarea name="creditRemark" rows="4" maxlength="200" required
+                    placeholder="例如：课堂表现优秀奖励 2 分；误操作补扣 1 分。"></textarea>
+        </label>
+      </div>
+      <div class="ai-quota-form-actions">
+        <span>加分会获得 30 天有效期；扣分不能超过当前本域积分。</span>
+        <button class="rounded primary button" type="submit">确认修改积分</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">积分变动记录</h1>
+    <span class="ai-quota-count">最近 {{ creditHistory|length }} 条</span>
+  </div>
+  <div class="section__body no-padding">
+    {% if creditHistory|length == 0 %}
+      <div class="ai-quota-empty">该学生还没有积分变动记录。</div>
+    {% else %}
+      <div class="ai-table-wrap">
+        <table class="data-table ai-history-table">
+          <thead>
+            <tr>
+              <th>操作时间</th>
+              <th>来源</th>
+              <th class="col--center">积分变动</th>
+              <th>有效期</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for record in creditHistory %}
+              <tr>
+                <td>{{ datetimeSpan(record.at, true)|safe }}</td>
+                <td>
+                  {% if record.operatorUid and operators[record.operatorUid] %}
+                    {{ user.render_inline(operators[record.operatorUid], badge=false) }}
+                  {% elif record.operatorUid %}
+                    <span class="text-gray">#{{ record.operatorUid }}</span>
+                  {% elif record.kind == 'weeklyGrant' %}
+                    每周自动发放
+                  {% elif record.kind == 'firstAcAward' %}
+                    首次 AC
+                  {% elif record.kind == 'aiAnalysis' %}
+                    AI 调用
+                  {% elif record.kind == 'expired' %}
+                    过期清空
+                  {% elif record.kind == 'refund' %}
+                    调用退款
+                  {% else %}
+                    <span class="text-gray">{{ record.kind|default('-') }}</span>
+                  {% endif %}
+                </td>
+                <td class="col--center">
+                  {% if record.amount > 0 %}
+                    <strong class="ai-add-value">+{{ record.amount }}</strong>
+                  {% else %}
+                    <strong class="ai-minus-value">{{ record.amount }}</strong>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if record.expiresAt %}
+                    {{ datetimeSpan(record.expiresAt, true)|safe }} 到期
+                    {% if record.remaining is defined %}
+                      <div class="text-gray">剩余 {{ record.remaining }}</div>
+                    {% endif %}
+                  {% else %}
+                    <span class="text-gray">-</span>
+                  {% endif %}
+                </td>
+                <td class="ai-remark">{{ record.reason|default('手动修改积分') }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">操作记录</h1>
+    <span class="ai-quota-count">共 {{ historyCount }} 条</span>
+  </div>
+  <div class="section__body no-padding">
+    {% if history|length == 0 %}
+      <div class="ai-quota-empty">该学生还没有追加次数记录。</div>
+    {% else %}
+      <div class="ai-table-wrap">
+        <table class="data-table ai-history-table">
+          <thead>
+            <tr>
+              <th>操作时间</th>
+              <th>操作者</th>
+              <th>所属月份</th>
+              <th>追加次数</th>
+              <th>上限变更</th>
+              <th>操作说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for record in history %}
+              <tr>
+                <td>{{ datetimeSpan(record.at, true)|safe }}</td>
+                <td>
+                  {% if operators[record.operatorUid] %}
+                    {{ user.render_inline(operators[record.operatorUid], badge=false) }}
+                  {% else %}
+                    <span class="text-gray">#{{ record.operatorUid|default('-') }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ record.monthKey }}</td>
+                <td><strong class="ai-add-value">+{{ record.amount }}</strong></td>
+                <td>
+                  {% if record.beforeBonus is defined and record.afterBonus is defined %}
+                    +{{ record.beforeBonus }} -> +{{ record.afterBonus }}
+                  {% else %}
+                    <span class="text-gray">旧记录未保存前后值</span>
+                  {% endif %}
+                </td>
+                <td class="ai-remark">{{ record.remark|default('旧记录未填写说明') }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {{ paginator.render(page, historyPageCount, add_qs=qs) }}
+    {% endif %}
+  </div>
+</div>
+
+<style>
+  .ai-quota-header {
+    align-items: center; display: flex; gap: 16px; justify-content: space-between;
+  }
+  .ai-quota-subtitle { color: #606c76; display: block; font-size: 14px; margin-top: 6px; }
+  .ai-quota-stats {
+    display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .ai-stat {
+    background: #f5f7f8; border-radius: 6px; padding: 13px 14px;
+  }
+  .ai-stat span { color: #687580; display: block; font-size: 12px; margin-bottom: 5px; }
+  .ai-stat strong { font-size: 20px; font-weight: 500; }
+  .ai-stat-accent { background: #eaf4fc; color: #2677ad; }
+  .ai-stat-credit { background: #eef8f1; color: #237343; }
+  .ai-quota-note { color: #66737f; font-size: 13px; margin: 14px 0 0; }
+  .ai-quota-create-header { align-items: flex-start; }
+  .ai-quota-create-subtitle {
+    color: #78828d; display: block; font-size: 13px; margin-top: 5px;
+  }
+  .ai-quota-create-body { padding: 18px 20px 20px; }
+  .ai-quota-form {
+    background: #f8fafb; border: 1px solid #e3e8ed; border-radius: 6px;
+    margin: 0; max-width: 860px; padding: 16px;
+  }
+  .ai-quota-form-grid {
+    align-items: stretch; display: grid; gap: 14px; grid-template-columns: 190px minmax(0, 1fr);
+  }
+  .ai-field {
+    background: #fff; border: 1px solid #dde4ea; border-radius: 6px;
+    box-sizing: border-box; display: block; margin: 0; padding: 13px 14px;
+  }
+  .ai-field span { color: #2f3b45; display: block; font-weight: 500; margin-bottom: 8px; }
+  .ai-field small { color: #87939d; font-weight: normal; margin-left: 6px; }
+  .ai-field input {
+    box-sizing: border-box; font-size: 22px; height: 42px; margin: 0; text-align: center; width: 100%;
+  }
+  .ai-field em {
+    color: #7a858e; display: block; font-size: 12px; font-style: normal; margin-top: 8px;
+  }
+  .ai-field textarea {
+    box-sizing: border-box; margin: 0; max-width: 100%; min-height: 96px; resize: vertical; width: 100%;
+  }
+  .ai-quota-form-actions {
+    align-items: center; border-top: 1px solid #e3e8ed; display: flex; gap: 12px;
+    justify-content: space-between; margin-top: 14px; padding-top: 14px;
+  }
+  .ai-quota-form-actions span { color: #78828d; font-size: 13px; }
+  .ai-quota-form-actions .button { margin: 0; white-space: nowrap; }
+  .ai-quota-count { color: #7a858e; font-size: 13px; }
+  .ai-table-wrap { overflow-x: auto; }
+  .ai-history-table { min-width: 780px; top: auto !important; }
+  .ai-history-table td { vertical-align: middle; }
+  .ai-add-value { color: #237343; }
+  .ai-minus-value { color: #c0392b; }
+  .ai-remark { max-width: 280px; white-space: normal; word-break: break-word; }
+  .ai-quota-empty { color: #888; padding: 32px 20px; text-align: center; }
+  .pager { padding-bottom: 16px; }
+  @media screen and (max-width: 640px) {
+    .ai-quota-header { align-items: stretch; flex-direction: column; }
+    .ai-quota-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ai-quota-form-grid { grid-template-columns: 1fr; }
+    .ai-quota-form-actions { align-items: stretch; flex-direction: column; }
+    .ai-quota-form-actions .button { width: 100%; }
+  }
+</style>
+<script>
+  (function () {
+    function markAiTutorMenu() {
+      var link = document.querySelector('#menu-item-ai_tutor_domain_manage > .menu__link');
+      if (link) link.classList.add('active');
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', markAiTutorMenu);
+    else markAiTutorMenu();
+  })();
+</script>
+{% endblock %}
