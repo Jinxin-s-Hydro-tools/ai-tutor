@@ -1,196 +1,293 @@
 # hydro-ai-tutor
 
-HydroOJ 插件——在评测详情页加入 **AI 刷题建议** 功能，为信息学竞赛学员（主要面向小学生）提供启发式、不直接给代码的辅导。
+`hydro-ai-tutor` 是一个给 HydroOJ 用的「AI 刷题教练」插件。
 
-- 基于 OpenAI-兼容接口（DeepSeek、OpenAI、通义千问、Kimi、GLM、豆包等）流式推送建议
-- 完整的积分与配额体系：每周自动发放积分、首次 AC 奖励、30 天到期、月度调用上限
-- 二轮对话：主分析 + 学生反思后跟进回复
-- 所有 AI 配置均在域管理界面完成，无需改配置文件或重启
+它会在评测详情页增加一个 **AI 刷题建议** 按钮。学生提交代码后，如果老师已经为这个学生开启 AI 功能，学生就可以让 AI 看题面、代码和评测结果，然后得到一段启发式建议。
 
----
+这个插件的目标不是让 AI 直接讲题解、直接给代码，而是像助教一样提醒学生：
 
-## 功能概览
+- 你可能卡在了哪里；
+- 哪个变量、输入、边界或思路需要再检查；
+- 下一步可以怎么自己试；
+- 为什么这次评测结果可能不对。
 
-| 功能 | 说明 |
-|---|---|
-| **AI 刷题建议按钮** | 在评测详情页注入按钮，点击跳转分析页 |
-| **流式输出** | AI 回复实时逐字推送（SSE） |
-| **卡点选择 + 补充说明** | 学生先选最想解决的卡点，再写不少于 10 字的说明，帮助 AI 给出针对性指导 |
-| **反思对话** | 看完分析后，学生写反思，AI 给出免费的跟进回复 |
-| **积分系统** | 每次调用消耗 1 积分；积分 30 天内有效，按 FIFO 顺序消耗 |
-| **每周积分发放** | 每周自动向已开通用户发放 5 积分 |
-| **首次 AC 奖励** | 每道题首次 AC 奖励积分（默认 1 分，可配置） |
-| **月度调用上限** | 硬性上限，超出后本月不能再调用（与积分余额独立计算） |
-| **提交门槛** | 同一道题至少提交 N 次后才能调用 AI（默认 2 次） |
-| **域级管理** | 老师可按用户开关 AI 功能、查看使用记录、追加配额或积分 |
+内置提示词默认面向 10-12 岁的小学生，会尽量使用生活化比喻，并且明确要求 AI **不输出完整代码**、**不直接报算法名**、**不把题做完**。
 
 ---
 
-## 安装
+## 主要功能
+
+### 学生侧
+
+- 在评测详情页显示 **AI 刷题建议** 按钮。
+- 进入 AI 分析页后，学生需要先选择自己最想解决的卡点。
+- 学生还要写一段不少于 10 个字的补充说明，避免什么都没想就直接问 AI。
+- AI 回复会实时流式显示，不用等整段生成完。
+- 看完建议后，学生可以写一段反思，AI 会再给一次免费的跟进回复。
+- 学生可以在 `/ai-tutor/credits` 查看自己的 AI 积分明细。
+
+### 老师侧
+
+入口在 **域管理 → AI 刷题管理**。
+
+老师可以：
+
+- 为当前域配置 AI 提供方、模型和 API Key；
+- 按学生开启或关闭 AI 功能；
+- 查看学生本月调用次数、积分余额和最后使用时间；
+- 给单个学生追加本月可用次数；
+- 批量调整学生的积分或可用上限；
+- 查看域内 AI 使用记录。
+
+### 系统侧
+
+- 每次 AI 分析消耗 1 积分。
+- 每周自动给已开启 AI 的学生发放 5 积分。
+- 学生每道题首次 AC 会奖励积分，默认 1 分。
+- 积分 30 天有效，过期自动清理。
+- 每个学生还有月度调用上限，默认每月 30 次。
+- 同一道题默认至少提交 2 次后才能问 AI。
+- AI 调用失败或中断时，会尽量退回已扣积分。
+
+---
+
+## 使用流程
+
+### 1. 管理员安装插件
+
+在 HydroOJ 实例中注册插件路径：
 
 ```bash
-# 1. 注册插件
-hydrooj addon add /path/to/hydro-ai-tutor
-
-# 2. 重启以加载插件
+hydrooj addon add /root/.hydro/addons/ai-tutor
 pm2 restart hydrooj
-
-# 3. 查看日志确认加载成功
-pm2 logs hydrooj
 ```
 
-插件没有独立的编译步骤，HydroOJ 框架会在加载时自动转译 TypeScript。
+也可以直接把插件路径写入 `/root/.hydro/addon.json`，然后重启 `hydrooj`。
+
+### 2. 域管理员配置 AI 接口
+
+登录后进入：
+
+```text
+域管理 → AI 刷题管理
+```
+
+在页面顶部选择 AI 提供方，并填写 API Key。
+
+插件支持 DeepSeek、OpenAI、通义千问、Kimi、GLM、豆包，以及任意 OpenAI 兼容接口。
+
+如果选择「自定义」，需要同时填写：
+
+- Base URL
+- 模型名称
+- API Key
+
+### 3. 老师给学生开启 AI
+
+仍然在 **域管理 → AI 刷题管理** 页面中，找到学生并打开 AI 开关。
+
+只有被开启的学生才能看到并使用 AI 刷题建议。
+
+### 4. 学生提交代码后使用 AI
+
+学生进入某条提交记录详情页，如果满足条件，就会在代码区域旁边看到 **AI 刷题建议** 按钮。
+
+需要同时满足：
+
+- 老师已为该学生开启 AI；
+- 当前提交属于可分析的编程题；
+- 学生有足够积分；
+- 本月调用次数没有超过上限；
+- 同一道题提交次数达到系统设置的门槛。
 
 ---
 
-## 配置 AI 提供方
+## 常用配置
 
-**API Key 和模型选择均在域管理界面配置，不需要修改任何配置文件。**
+这些配置在 **控制面板 → 系统设置** 中调整。
 
-1. 以域管理员身份登录
-2. 进入 **域管理 → AI 刷题管理**
-3. 在页面顶部的"AI 接口配置"表单中选择提供方并填写 API Key
-4. 点击保存
-
-配置存储在 MongoDB `ai.domain_config` 集合，每个域独立配置。
-
-### 支持的提供方
-
-| 选项 | 模型 | 接口地址 |
-|---|---|---|
-| DeepSeek V4 Flash（默认） | `deepseek-v4-flash` | `api.deepseek.com` |
-| DeepSeek V4 Pro | `deepseek-v4-pro` | `api.deepseek.com` |
-| DeepSeek Reasoner | `deepseek-reasoner` | `api.deepseek.com` |
-| OpenAI GPT-4o mini | `gpt-4o-mini` | `api.openai.com/v1` |
-| OpenAI GPT-4o | `gpt-4o` | `api.openai.com/v1` |
-| 阿里 通义千问 Turbo | `qwen-turbo` | Dashscope 兼容入口 |
-| 阿里 通义千问 Plus | `qwen-plus` | Dashscope 兼容入口 |
-| Moonshot Kimi | `kimi-latest` | `api.moonshot.cn/v1` |
-| 智谱 GLM-4 Flash | `glm-4-flash` | `open.bigmodel.cn` |
-| 字节豆包 Pro | `doubao-pro-32k` | 火山方舟 |
-| 自定义 | 填写 Base URL + 模型名 | 任意 OpenAI 兼容接口 |
-
----
-
-## 系统设置
-
-在 **控制面板 → 系统设置** 中可调整以下全局参数：
-
-| 设置项 | 默认值 | 说明 |
-|---|---|---|
-| `ai-tutor.creditsPerFirstAc` | `1` | 每道题首次 AC 奖励积分数；设为 0 关闭奖励 |
-| `ai-tutor.monthlyQuota` | `30` | 每用户每月调用上限（月底自动重置） |
-| `ai-tutor.minSubmissions` | `2` | 同一道题至少提交 N 次才能调用 AI |
-| `ai-tutor.maxCodeChars` | `3000` | 发给 AI 的代码最大字符数（超出截断） |
-| `ai-tutor.maxProblemChars` | `4000` | 发给 AI 的题面最大字符数（超出截断） |
-| `ai-tutor.temperature` | `0.7` | 采样温度（0–1） |
+| 配置项 | 默认值 | 说明 |
+|---|---:|---|
+| `ai-tutor.creditsPerFirstAc` | `1` | 每道题首次 AC 奖励多少积分，设为 `0` 可关闭奖励 |
+| `ai-tutor.monthlyQuota` | `30` | 每个学生每月最多调用 AI 的次数 |
+| `ai-tutor.minSubmissions` | `2` | 同一道题至少提交几次后才能问 AI |
+| `ai-tutor.maxCodeChars` | `3000` | 发给 AI 的代码最大字符数 |
+| `ai-tutor.maxProblemChars` | `4000` | 发给 AI 的题面最大字符数 |
+| `ai-tutor.temperature` | `0.7` | AI 生成温度 |
 | `ai-tutor.maxTokens` | `8192` | 单次最大输出 token 数 |
-| `ai-tutor.timeoutMs` | `60000` | 单次请求超时（毫秒） |
-| `ai-tutor.systemPrompt` | 内置教练提示词 | 可在控制面板覆盖整个 system prompt |
+| `ai-tutor.timeoutMs` | `60000` | 单次请求超时时间，单位毫秒 |
+| `ai-tutor.systemPrompt` | 内置提示词 | 控制 AI 教练的说话风格和规则 |
 
 ---
 
-## 域级管理
+## 积分和次数怎么理解
 
-以下操作均需 **PERM_EDIT_DOMAIN** 权限，入口在 **域管理 → AI 刷题管理**。
+插件同时使用「积分」和「月度上限」两套限制。
 
-| 页面 | 路由 | 功能 |
+积分像余额，每问一次 AI 消耗 1 分。没有积分，就不能调用 AI。
+
+月度上限像防刷限制，即使还有积分，本月次数用完后也不能继续调用。
+
+举个例子：
+
+- 学生有 8 积分，本月已用 30/30 次：不能继续用，因为月度次数满了。
+- 学生有 0 积分，本月只用 3/30 次：也不能继续用，因为积分不够。
+- 学生有 8 积分，本月已用 3/30 次：可以继续用。
+
+积分来源主要有三种：
+
+- 每周自动发放；
+- 首次 AC 奖励；
+- 老师手动追加或批量导入。
+
+积分消耗时会优先使用快过期的积分，尽量减少浪费。
+
+---
+
+## 主要页面和路由
+
+| 页面 | 路由 | 说明 |
 |---|---|---|
-| AI 刷题管理 | `/domain/ai-tutor` | 查看/搜索用户列表；开关 AI 权限；配置 API 接口 |
-| 批量操作 | `/domain/ai-tutor/batch` | CSV 格式批量导入，调整积分或月度配额 |
-| 追加配额 | `/domain/ai-tutor/quota` | 为单个用户追加本月额外可用次数 |
-| 使用记录 | `/domain/ai-tutor/records` | 查看所有学生的调用历史 |
-
-学生可在 `/ai-tutor/credits` 查看自己的积分明细和变更历史。
-
----
-
-## 积分体系
-
-积分是调用 AI 的"货币"，月度调用上限是独立的硬封顶，两者同时满足才能使用。
-
-### 积分来源
-
-| 来源 | 说明 |
-|---|---|
-| 每周自动发放 | 每周 5 积分，发给所有已开通用户 |
-| 首次 AC 奖励 | 每道题首次通过评测奖励（默认 1 分），重复 AC 不重复奖励 |
-| 老师手动追加 | 域管理界面或批量操作中直接调整 |
-
-### 积分规则
-
-- 积分自发放起 **30 天有效**，超期自动清零
-- 消耗时按 **到期时间最近优先（FIFO）** 顺序扣减
-- AI 调用被中断或返回空内容时，**自动退回**已扣积分
-- 老师可通过批量操作同时调整积分余额和月度配额
+| AI 分析页 | `/record/:rid/ai` | 学生查看或生成 AI 刷题建议 |
+| 可用性检查 | `/record/:rid/ai/available` | 前端按钮注入前先检查是否可用 |
+| 学生积分明细 | `/ai-tutor/credits` | 学生查看自己的积分变化 |
+| 域 AI 管理 | `/domain/ai-tutor` | 老师管理学生开关和 AI 接口配置 |
+| 批量调整 | `/domain/ai-tutor/batch` | 老师批量设置积分或上限 |
+| 追加次数 | `/domain/ai-tutor/quota` | 老师给单个学生追加本月可用次数 |
+| 使用记录 | `/domain/ai-tutor/records` | 老师查看 AI 调用流水 |
 
 ---
 
-## 路由
+## 后台脚本
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/record/:rid/ai` | 分析页（有缓存直接展示，无则显示"开始分析"） |
-| GET | `/record/:rid/ai/available` | 检查当前用户是否可用 AI（前端按钮注入时调用） |
-| POST | `/record/:rid/ai` `action=start` | 启动分析，返回 SSE 流 |
-| POST | `/record/:rid/ai` `action=clear` | 清除已有分析 |
-| POST | `/record/:rid/ai` `action=reflect` | 提交学生反思，返回 SSE 流 |
-| POST | `/record/:rid/ai` `action=regenerateReflect` | 重新生成中断的反思回复 |
+插件注册了几个 Hydro 脚本，适合管理员在后台批量处理。
 
-**访问权限**：提交者本人，或拥有 `PERM_READ_RECORD_CODE` 的管理员。
+### 给已开启 AI 的学生发积分
+
+```json
+{"domainId":"system","amount":5,"reason":"月初发放 AI 积分"}
+```
+
+脚本名：
+
+```text
+aiTutorGrantCredits
+```
+
+### 重置已开启 AI 学生的本月上限
+
+```json
+{"domainId":"system","quota":30}
+```
+
+脚本名：
+
+```text
+aiTutorWeeklyCreditGrant
+```
+
+### 扫描题目并评估难度
+
+```json
+{"domainId":"system","limit":50,"overwrite":false,"includeHidden":false,"dryRun":false}
+```
+
+脚本名：
+
+```text
+aiTutorDifficultyScan
+```
+
+这个脚本会调用当前域配置的 AI 接口，为题目写入 1-10 的难度分。首次运行建议先把 `dryRun` 设为 `true` 看输出。
 
 ---
 
-## MongoDB 集合
+## 数据存在哪里
+
+插件使用 MongoDB，主要集合如下：
 
 | 集合 | 用途 |
 |---|---|
-| `ai.analysis` | 每条提交最多保存一份 AI 回复（含对话轮次和历史） |
-| `ai.usage` | 每次调用的流水日志，用于月度配额计数 |
-| `ai.credit` | 每个 `(domainId, uid)` 的积分余额 |
-| `ai.credit_ledger` | 积分变更的追加日志（发放、扣减、退款、到期） |
-| `ai.credit_award` | 首次 AC 奖励去重记录 |
-| `ai.domain_access` | 每个用户在该域的 AI 开关和月度配额 |
-| `ai.domain_config` | 每个域的 AI 提供方、模型和 API Key |
-| `ai.credit_adjust` | 老师手动调整积分/配额的审计日志 |
-
----
-
-## 提示词设计
-
-内置 system prompt 的核心约束：
-
-- **不给代码**：任何情况下不输出完整代码行（包括"改成：……"后跟代码）
-- **不报算法名**：不直接说动态规划、贪心、二分等术语，而是用比喻引导
-- **小学生语言**：用变量=盒子、循环=重复做事、数组=连号柜子等比喻
-- **定向指出**：用反引号引用出错的标识符，但只给修改方向，不给完整改法
-- **字数限制**：200–350 字，避免 AI 替学生把思路全说完
-
-System prompt 可在控制面板覆盖。卡点选项（`questionFocus`）和学生补充说明（`studentNote`）会一并注入 user prompt，帮助 AI 针对性地回答。
+| `ai.analysis` | 保存某条提交的 AI 分析结果和对话记录 |
+| `ai.usage` | 保存每次 AI 调用流水，用于统计月度次数 |
+| `ai.credit` | 保存每个学生在每个域的积分余额 |
+| `ai.credit_ledger` | 保存积分增减明细 |
+| `ai.credit_award` | 记录首次 AC 奖励，避免重复发分 |
+| `ai.domain_access` | 保存域内每个学生的 AI 开关和额外配额 |
+| `ai.domain_config` | 保存每个域的 AI 提供方、模型和 API Key |
+| `ai.credit_adjust` | 保存老师手动调整积分或次数的审计日志 |
 
 ---
 
 ## 文件结构
 
-```
-hydro-ai-tutor/
-├── index.ts                        # 插件入口：路由、事件监听、系统设置注册
-├── constants.ts                    # 提供方列表、默认 system prompt、集合名常量
-├── credits.ts                      # 积分增减、到期清理、批量发放
-├── utils.ts                        # cfg()、resolveProvider()、buildUserPrompt() 等工具函数
-├── difficulty.ts                   # 题目难度评估脚本（可选功能）
-├── types.ts                        # TypeScript 类型定义
-├── handlers.ts                     # Handler 统一导出
+```text
+ai-tutor/
+├── index.ts                       # 插件入口：注册设置、路由、事件、定时任务
+├── constants.ts                   # AI 提供方、提示词、集合名等常量
+├── credits.ts                     # 积分发放、扣减、退款、过期
+├── difficulty.ts                  # 题目难度 AI 扫描脚本
+├── utils.ts                       # 通用工具函数
+├── types.ts                       # 类型定义
+├── handlers.ts                    # Handler 统一导出
 ├── handlers/
-│   ├── suggestion.ts               # 分析页、SSE 流、反思对话
-│   ├── domain_manage.ts            # 域管理主页（用户列表 + 接口配置）
-│   ├── domain_batch.ts             # 批量导入调整
-│   ├── domain_quota.ts             # 单用户追加配额
-│   ├── admin.ts                    # 使用记录查询
-│   └── credit_detail.ts           # 学生积分明细页
-├── templates/                      # Nunjucks 模板
+│   ├── suggestion.ts              # AI 分析页和流式生成
+│   ├── domain_manage.ts           # 域管理主页
+│   ├── domain_batch.ts            # 批量调整
+│   ├── domain_quota.ts            # 单用户追加次数
+│   ├── admin.ts                   # 使用记录
+│   └── credit_detail.ts           # 学生积分明细
 ├── frontend/
-│   └── record_ai_button.page.tsx  # 在评测详情页注入按钮
+│   └── record_ai_button.page.tsx  # 在评测详情页注入 AI 按钮
+├── templates/                     # Nunjucks 页面模板
 └── locales/
-    └── zh.yaml
+    └── zh.yaml                    # 中文文案
 ```
+
+---
+
+## 开发和排查
+
+修改插件代码后重启 HydroOJ：
+
+```bash
+pm2 restart hydrooj
+```
+
+查看日志：
+
+```bash
+pm2 logs hydrooj
+```
+
+如果学生看不到按钮，优先检查：
+
+- 学生是否登录；
+- 老师是否在当前域给学生开启 AI；
+- 当前提交是否是编程题；
+- 页面 URL 是否带有正确的 `/d/<domainId>/record/<rid>` 域前缀；
+- `/record/:rid/ai/available` 是否返回可用。
+
+如果能打开页面但不能生成，优先检查：
+
+- 当前域是否配置 API Key；
+- 自定义提供方是否同时配置了 Base URL 和模型名；
+- 学生积分是否足够；
+- 本月次数是否已达上限；
+- 同一道题提交次数是否达到门槛；
+- `pm2 logs hydrooj` 中是否有 AI 接口报错或超时。
+
+---
+
+## 设计原则
+
+这个插件的核心原则是：**AI 只能做教练，不能替学生做题。**
+
+所以默认提示词会尽量让 AI：
+
+- 少讲术语，多讲比喻；
+- 少给结论，多问问题；
+- 指出关键卡点，而不是罗列所有错误；
+- 给修改方向，不给完整代码；
+- 鼓励学生继续自己尝试。
+
