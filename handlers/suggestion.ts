@@ -15,7 +15,7 @@ import {
 } from '../credits';
 import { AiAnalysisDoc, AiDomainAccessDoc } from '../types';
 import {
-    buildUserPrompt, cfg, creditId, creditQuery, escapeRegex, isObjectiveProblem, looksInterruptedReply,
+    buildUserPrompt, cfg, cfgNumber, creditId, creditQuery, escapeRegex, isObjectiveProblem, looksInterruptedReply,
     monthKey, monthlyQuotaBonus, monthlyQuotaCap, parseIntegerCell, resolveAiTutorDomain, resolveProvider, splitImportLine,
 } from '../utils';
 
@@ -59,7 +59,7 @@ export class AiSuggestionHandler extends Handler {
 
         // Submission-gate: count how many times THIS user submitted THIS problem
         // (across all records in this domain). Used to block first-try AI requests.
-        this.minSubmissions = Math.max(1, cfg<number>('minSubmissions', 2));
+        this.minSubmissions = Math.max(1, Math.trunc(cfgNumber('minSubmissions', 2)));
         this.submissionCount = await RecordModel.coll.countDocuments({
             domainId: rdoc.domainId,
             uid: rdoc.uid,
@@ -249,9 +249,9 @@ export class AiSuggestionHandler extends Handler {
         }
 
         const { baseUrl, model, apiKey } = provider;
-        const temperature = cfg<number>('temperature', 0.7);
-        const maxTokens = cfg<number>('maxTokens', 1024);
-        const timeoutMs = cfg<number>('timeoutMs', 60000);
+        const temperature = cfgNumber('temperature', 0.7);
+        const maxTokens = Math.trunc(cfgNumber('maxTokens', 1024));
+        const timeoutMs = cfgNumber('timeoutMs', 60000);
         const systemPrompt = cfg<string>('systemPrompt', DEFAULT_SYSTEM_PROMPT);
 
         const STATUS_TEXTS = global.Hydro.model.builtin.STATUS_TEXTS;
@@ -539,8 +539,8 @@ export class AiSuggestionHandler extends Handler {
             return;
         }
         const { baseUrl, model, apiKey } = provider;
-        const temperature = cfg<number>('temperature', 0.7);
-        const timeoutMs = cfg<number>('timeoutMs', 60000);
+        const temperature = cfgNumber('temperature', 0.7);
+        const timeoutMs = cfgNumber('timeoutMs', 60000);
         const systemPrompt = cfg<string>('systemPrompt', DEFAULT_SYSTEM_PROMPT);
 
         // Persist student message immediately (so admins see what the student typed
@@ -710,8 +710,8 @@ export class AiSuggestionHandler extends Handler {
             return;
         }
         const { baseUrl, model, apiKey } = provider;
-        const temperature = cfg<number>('temperature', 0.7);
-        const timeoutMs = cfg<number>('timeoutMs', 60000);
+        const temperature = cfgNumber('temperature', 0.7);
+        const timeoutMs = cfgNumber('timeoutMs', 60000);
         const systemPrompt = cfg<string>('systemPrompt', DEFAULT_SYSTEM_PROMPT);
         const followUpSys = `${systemPrompt}
 

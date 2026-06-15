@@ -15,7 +15,7 @@ import {
 } from '../credits';
 import { AiAnalysisDoc, AiDomainAccessDoc } from '../types';
 import {
-    buildUserPrompt, cfg, creditId, creditQuery, escapeRegex, isObjectiveProblem, looksInterruptedReply,
+    buildUserPrompt, cfg, cfgNumber, creditId, creditQuery, escapeRegex, isObjectiveProblem, looksInterruptedReply,
     getDomainAiConfig, monthKey, monthlyQuotaBonus, monthlyQuotaCap, parseIntegerCell, resolveAiTutorDomain,
     resolveProvider, splitImportLine,
 } from '../utils';
@@ -112,7 +112,7 @@ export class AiTutorDomainManageHandler extends Handler {
         accessDocs.forEach((doc: any) => { accessMap[doc.uid] = doc; });
         balanceDocs.forEach((doc: any) => { balanceMap[doc.uid] = doc; });
         usageRows.forEach((doc: any) => { usageMap[doc._id] = doc; });
-        const baseCap = cfg<number>('monthlyQuota', 30);
+        const baseCap = Math.max(0, Math.trunc(cfgNumber('monthlyQuota', 30)));
         const rows = memberDocs.map((member: any) => {
             const access = accessMap[member.uid] || {};
             const bonus = monthlyQuotaBonus(access, month);

@@ -6,7 +6,7 @@ import {
     COLL_CREDIT, COLL_USAGE,
 } from '../constants';
 import {
-    cfg, creditId, escapeRegex, monthKey,
+    cfgNumber, creditId, escapeRegex, monthKey,
 } from '../utils';
 
 export class AiTutorDomainRecordsHandler extends Handler {
@@ -58,7 +58,7 @@ export class AiTutorDomainRecordsHandler extends Handler {
         const balanceMap: Record<number, any> = {};
         balanceDocs.forEach((b) => { balanceMap[b.uid as any as number] = b; });
 
-        const monthlyCap = cfg<number>('monthlyQuota', 30);
+        const monthlyCap = Math.max(0, Math.trunc(cfgNumber('monthlyQuota', 30)));
         const byUser = byUserRaw.map((r) => ({
             uid: r._id,
             user: userMap[r._id as any as number],

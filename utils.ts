@@ -20,11 +20,18 @@ export function cfg<T = string>(key: string, fallback: T): T {
     return (v === undefined || v === null || v === '') ? fallback : (v as T);
 }
 
+export function cfgNumber(key: string, fallback: number): number {
+    const v = SystemModel.get(`ai-tutor.${key}`);
+    if (v === undefined || v === null || v === '') return fallback;
+    const n = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(n) ? n : fallback;
+}
+
 export function monthlyQuotaBase(access: AiDomainAccessDoc | null | undefined, month = monthKey()) {
     if (access?.quotaMonth === month && Number.isSafeInteger(access.quotaLimit)) {
         return Math.max(0, access.quotaLimit || 0);
     }
-    return Math.max(0, Math.trunc(cfg<number>('monthlyQuota', 30) || 0));
+    return Math.max(0, Math.trunc(cfgNumber('monthlyQuota', 30) || 0));
 }
 
 export function monthlyQuotaBonus(access: AiDomainAccessDoc | null | undefined, month = monthKey()) {
@@ -125,8 +132,8 @@ export function buildUserPrompt(
         .map((tc: any, i: number) => `  · 第 ${i + 1} 个失败点：${tc.message || ''}`.trim())
         .join('\n');
 
-    const maxProblem = cfg<number>('maxProblemChars', 4000);
-    const maxCode = cfg<number>('maxCodeChars', 3000);
+    const maxProblem = cfgNumber('maxProblemChars', 4000);
+    const maxCode = cfgNumber('maxCodeChars', 3000);
 
     const questionContext = questionFocusLabel && studentNote
         ? `## 我这次遇到的卡点

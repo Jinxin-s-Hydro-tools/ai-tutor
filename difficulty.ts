@@ -1,7 +1,7 @@
 import { Context } from 'hydrooj';
 
 import { DifficultyScanArgs, DifficultyScore } from './types';
-import { cfg, resolveProvider, truncate } from './utils';
+import { cfgNumber, resolveProvider, truncate } from './utils';
 
 export function normalizeDifficulty(n: any): number | null {
     const value = Math.round(Number(n));
@@ -42,8 +42,8 @@ export async function scoreProblemDifficulty(ctx: Context, pdoc: any): Promise<D
     if (!baseUrl || !model || !apiKey) {
         throw new Error(`AI provider 未配置完整，请检查域 ${pdoc.domainId} 的 AI 刷题管理配置。`);
     }
-    const maxProblem = cfg<number>('maxProblemChars', 4000);
-    const timeoutMs = cfg<number>('timeoutMs', 60000);
+    const maxProblem = cfgNumber('maxProblemChars', 4000);
+    const timeoutMs = cfgNumber('timeoutMs', 60000);
     const aborter = new AbortController();
     const timer = setTimeout(() => aborter.abort(), timeoutMs);
     const prompt = `请作为信息学竞赛教练，为下面 HydroOJ 题目评估难度。

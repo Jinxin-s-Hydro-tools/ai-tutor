@@ -13,7 +13,7 @@ import {
     AiSuggestionAvailabilityHandler, AiSuggestionHandler, AiTutorCreditDetailHandler, AiTutorDomainRecordsHandler,
     AiTutorDomainBatchHandler, AiTutorDomainManageHandler, AiTutorDomainQuotaHandler,
 } from './handlers';
-import { cfg, nextWeeklyCreditResetAt } from './utils';
+import { cfgNumber, nextWeeklyCreditResetAt } from './utils';
 
 export async function apply(ctx: Context) {
     // Use the official `ctx.inject(['setting'], ...)` pattern (same as ui-default does).
@@ -143,7 +143,7 @@ export async function apply(ctx: Context) {
     // this (uid, pid) flipped — which is exactly the "first time they reached AC".
     // The unique index on ai.credit_award is a second safety net against double-award.
     ctx.on('record/judge', async (rdoc: any, updated: boolean) => {
-        const amount = cfg<number>('creditsPerFirstAc', 1);
+        const amount = cfgNumber('creditsPerFirstAc', 1);
         if (amount <= 0) return; // award disabled
         const STATUS_ACCEPTED = 1;
         if (rdoc?.status !== STATUS_ACCEPTED) return;
