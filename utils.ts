@@ -1,6 +1,6 @@
 import { Context, moment, SystemModel } from 'hydrooj';
 
-import { COLL_DOMAIN_CONFIG, PROVIDERS } from './constants';
+import { COLL_DOMAIN_CONFIG, DAILY_CHECKIN_CREDIT, PROVIDERS } from './constants';
 import { AiDomainAccessDoc, AiDomainConfigDoc } from './types';
 
 export function monthKey(d: Date = new Date()): string {
@@ -44,6 +44,11 @@ export function monthlyQuotaCap(access: AiDomainAccessDoc | null | undefined, mo
 
 export async function getDomainAiConfig(ctx: Context, domainId: string): Promise<AiDomainConfigDoc | null> {
     return ctx.db.collection(COLL_DOMAIN_CONFIG as any).findOne({ _id: domainId }) as Promise<AiDomainConfigDoc | null>;
+}
+
+export function dailyCheckinCredit(config: AiDomainConfigDoc | null | undefined) {
+    const amount = Math.trunc(Number(config?.dailyCheckinCredit ?? DAILY_CHECKIN_CREDIT));
+    return Number.isSafeInteger(amount) && amount > 0 ? amount : DAILY_CHECKIN_CREDIT;
 }
 
 export async function resolveProvider(ctx: Context, domainId: string): Promise<{

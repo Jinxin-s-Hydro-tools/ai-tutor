@@ -16,8 +16,8 @@ import {
 import { AiAnalysisDoc, AiDomainAccessDoc } from '../types';
 import {
     buildUserPrompt, cfg, cfgNumber, creditId, creditQuery, escapeRegex, isObjectiveProblem, looksInterruptedReply,
-    getDomainAiConfig, monthKey, monthlyQuotaBonus, monthlyQuotaCap, parseIntegerCell, resolveAiTutorDomain,
-    resolveProvider, splitImportLine,
+    dailyCheckinCredit, getDomainAiConfig, monthKey, monthlyQuotaBonus, monthlyQuotaCap, parseIntegerCell,
+    resolveAiTutorDomain, resolveProvider, splitImportLine,
 } from '../utils';
 
 export class AiTutorDomainManageHandler extends Handler {
@@ -141,6 +141,7 @@ export class AiTutorDomainManageHandler extends Handler {
             providerRange: PROVIDER_RANGE,
             providerLabel: PROVIDERS[domainAiConfig?.provider || 'deepseek-v4-flash']?.label || '',
             apiKeyConfigured: !!domainAiConfig?.apiKey,
+            dailyCheckinCredit: dailyCheckinCredit(domainAiConfig),
             rows,
             page,
             pageCount,
@@ -159,8 +160,10 @@ export class AiTutorDomainManageHandler extends Handler {
     @param('customModel', Types.String, true)
     @param('apiKey', Types.String, true)
     @param('clearApiKey', Types.Boolean, true)
+    @param('dailyCheckinCredit', Types.UnsignedInt, true)
     async postSaveConfig(
-        domainId: string, provider: string, customBaseUrl = '', customModel = '', apiKey = '', clearApiKey = false,
+        domainId: string, provider: string, customBaseUrl = '', customModel = '', apiKey = '',
+        clearApiKey = false, dailyCheckinCredit = 150,
     ) {
         provider = (provider || '').trim();
         if (!PROVIDERS[provider]) {
@@ -176,6 +179,12 @@ export class AiTutorDomainManageHandler extends Handler {
             return;
         }
         apiKey = (apiKey || '').trim();
+        dailyCheckinCredit = Math.trunc(Number(dailyCheckinCredit));
+        if (!Number.isSafeInteger(dailyCheckinCredit) || dailyCheckinCredit <= 0) {
+            this.response.body = { error: '每日签到积分必须是正整数。' };
+            this.response.status = 400;
+            return;
+        }
         const now = new Date();
         const update: any = {
             $set: {
@@ -183,6 +192,7 @@ export class AiTutorDomainManageHandler extends Handler {
                 provider,
                 customBaseUrl: provider === 'custom' ? customBaseUrl : '',
                 customModel: provider === 'custom' ? customModel : '',
+                dailyCheckinCredit,
                 updatedAt: now,
                 updatedBy: this.user._id,
             },
@@ -201,6 +211,7 @@ export class AiTutorDomainManageHandler extends Handler {
                 provider,
                 customBaseUrl: provider === 'custom' ? customBaseUrl : '',
                 customModel: provider === 'custom' ? customModel : '',
+                dailyCheckinCredit,
                 apiKeyChanged: !!apiKey || !!clearApiKey,
             }),
         ]);

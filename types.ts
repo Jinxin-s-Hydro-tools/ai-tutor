@@ -53,6 +53,7 @@ export interface AiDomainConfigDoc {
     customBaseUrl?: string;
     customModel?: string;
     apiKey?: string;
+    dailyCheckinCredit?: number;
     updatedAt: Date;
     updatedBy: number;
 }

@@ -1,8 +1,9 @@
-import { Context, ObjectId, PERM, PRIV, ScheduleModel, Schema } from 'hydrooj';
+import { Context, moment, ObjectId, PERM, PRIV, ScheduleModel, Schema } from 'hydrooj';
+import { HomeHandler } from 'hydrooj/src/handler/home';
 
 import {
-    COLL_ANALYSIS, COLL_AWARD, COLL_CREDIT, COLL_CREDIT_ADJUST, COLL_CREDIT_LEDGER, COLL_DOMAIN_ACCESS,
-    COLL_DOMAIN_CONFIG, COLL_USAGE, DEFAULT_SYSTEM_PROMPT, WEEKLY_CREDIT_RESET_TASK,
+    COLL_ANALYSIS, COLL_AWARD, COLL_CHECKIN, COLL_CREDIT, COLL_CREDIT_ADJUST, COLL_CREDIT_LEDGER,
+    COLL_DOMAIN_ACCESS, COLL_DOMAIN_CONFIG, COLL_USAGE, DEFAULT_SYSTEM_PROMPT, WEEKLY_CREDIT_RESET_TASK,
 } from './constants';
 import {
     addCreditGrant, bootstrapCreditLots, expireCredits, grantCreditsToEnabledUsers, grantWeeklyCredits,
@@ -10,12 +11,64 @@ import {
 } from './credits';
 import { runDifficultyScan, validateDifficultyScanArgs } from './difficulty';
 import {
-    AiSuggestionAvailabilityHandler, AiSuggestionHandler, AiTutorCreditDetailHandler, AiTutorDomainRecordsHandler,
-    AiTutorDomainBatchHandler, AiTutorDomainManageHandler, AiTutorDomainQuotaHandler,
+    AiSuggestionAvailabilityHandler, AiSuggestionHandler, AiTutorCreditDetailHandler, AiTutorDailyCheckinHandler,
+    AiTutorDomainRecordsHandler, AiTutorDomainBatchHandler, AiTutorDomainManageHandler, AiTutorDomainQuotaHandler,
 } from './handlers';
-import { cfgNumber, nextWeeklyCreditResetAt } from './utils';
+import {
+    cfgNumber, creditQuery, dailyCheckinCredit, getDomainAiConfig, nextWeeklyCreditResetAt,
+} from './utils';
+
+(HomeHandler.prototype as any).getAiTutorCheckin = async function getAiTutorCheckin(domainId: string) {
+    if (!this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) return { visible: false };
+    const uid = this.user._id;
+    const access = await this.ctx.db.collection(COLL_DOMAIN_ACCESS as any).findOne({
+        domainId,
+        uid,
+        enabled: true,
+    });
+    if (!access) return { visible: false };
+    const now = new Date();
+    const dayKey = moment(now).format('YYYY-MM-DD');
+    const currentMonth = moment(now).format('YYYY-MM');
+    const checkinColl = this.ctx.db.collection(COLL_CHECKIN as any);
+    const amount = dailyCheckinCredit(await getDomainAiConfig(this.ctx, domainId));
+    await expireCredits(this.ctx, uid, domainId);
+    const [todayDoc, balanceDoc, monthRows] = await Promise.all([
+        checkinColl.findOne({ domainId, uid, dayKey }),
+        this.ctx.db.collection(COLL_CREDIT as any).findOne(creditQuery(domainId, uid)),
+        checkinColl.aggregate([
+            { $match: { domainId, uid, monthKey: currentMonth } },
+            { $group: { _id: null, days: { $sum: 1 }, credits: { $sum: '$amount' } } },
+        ]).toArray(),
+    ]);
+    return {
+        visible: true,
+        loggedIn: true,
+        amount,
+        balance: (balanceDoc as any)?.balance ?? 0,
+        todayChecked: !!todayDoc,
+        todayAt: (todayDoc as any)?.at,
+        monthDays: monthRows[0]?.days || 0,
+        monthCredits: monthRows[0]?.credits || 0,
+    };
+};
 
 export async function apply(ctx: Context) {
+    ctx.on('handler/after/Home', async (handler) => {
+        if (handler.request.method !== 'get') return;
+        if (handler.response.template !== 'main.html') return;
+        const contents = handler.response.body?.contents;
+        if (!Array.isArray(contents) || !contents.length) return;
+
+        const rightColumn = contents.find((column: any) => Number(column.width) === 3) || contents[contents.length - 1];
+        if (!Array.isArray(rightColumn.sections)) return;
+        if (rightColumn.sections.some((section: any) => section?.[0] === 'ai_tutor_checkin')) return;
+
+        const payload = await (handler as any).getAiTutorCheckin(handler.domain._id);
+        if (!payload?.visible) return;
+        rightColumn.sections.unshift(['ai_tutor_checkin', payload]);
+    });
+
     // Use the official `ctx.inject(['setting'], ...)` pattern (same as ui-default does).
     // This ensures the setting service is ready and gives proper dispose-on-unload behavior.
     ctx.inject(['setting'], (c) => {
@@ -102,6 +155,11 @@ export async function apply(ctx: Context) {
         await dbs.collection(COLL_CREDIT_LEDGER as any).createIndex({ domainId: 1, uid: 1, at: -1 }).catch(swallow);
         await dbs.collection(COLL_CREDIT_LEDGER as any).createIndex({ refType: 1, refId: 1 }).catch(swallow);
         await dbs.collection(COLL_CREDIT_LEDGER as any).createIndex({ expiresAt: 1, remaining: 1 }).catch(swallow);
+        await dbs.collection(COLL_CHECKIN as any).createIndex(
+            { domainId: 1, uid: 1, dayKey: 1 },
+            { unique: true },
+        ).catch(swallow);
+        await dbs.collection(COLL_CHECKIN as any).createIndex({ domainId: 1, uid: 1, monthKey: 1 }).catch(swallow);
         await dbs.collection(COLL_DOMAIN_ACCESS as any).createIndex(
             { domainId: 1, uid: 1 },
             { unique: true },
@@ -199,6 +257,7 @@ export async function apply(ctx: Context) {
     ctx.Route('ai_suggestion_available', '/record/:rid/ai/available', AiSuggestionAvailabilityHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('ai_suggestion', '/record/:rid/ai', AiSuggestionHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('ai_tutor_credit_detail', '/ai-tutor/credits', AiTutorCreditDetailHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('ai_tutor_daily_checkin', '/ai-tutor/checkin', AiTutorDailyCheckinHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('ai_tutor_domain_quota', '/domain/ai-tutor/quota', AiTutorDomainQuotaHandler);
     ctx.Route('ai_tutor_domain_batch', '/domain/ai-tutor/batch', AiTutorDomainBatchHandler);
     ctx.Route('ai_tutor_domain_records', '/domain/ai-tutor/records', AiTutorDomainRecordsHandler);

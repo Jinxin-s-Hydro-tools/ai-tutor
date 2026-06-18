@@ -1,0 +1,168 @@
+<div class="ai-home-checkin" data-ai-checkin-card>
+  <div class="ai-home-checkin__top">
+    <span class="icon icon-gift"></span>
+    <strong>{{ domain.name or domain._id }}</strong>
+    <span>加油站</span>
+  </div>
+  <div class="ai-home-checkin__body">
+    {% if payload.loggedIn %}
+      <div class="ai-home-checkin__user">
+        <span>{{ handler.user.uname }}</span>
+      </div>
+      <div class="ai-home-checkin__line">
+        每日可领 <strong>{{ payload.amount }} 积分</strong>（有效期1个月）
+      </div>
+      <div class="ai-home-checkin__line">
+        已领 <strong data-ai-checkin-days>{{ payload.monthDays }}</strong> 天
+        <span>·</span>
+        累计 <strong><span data-ai-checkin-credits>{{ payload.monthCredits }}</span> 积分</strong>
+      </div>
+      <div class="ai-home-checkin__line">
+        当前积分：<strong data-ai-checkin-balance>{{ payload.balance }}</strong>
+      </div>
+      <div class="ai-home-checkin__actions">
+        <form method="post" action="{{ url('ai_tutor_daily_checkin') }}" data-ai-checkin-form>
+          <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+          <input type="hidden" name="operation" value="claim">
+          <button class="rounded{% if not payload.todayChecked %} primary{% endif %} button ai-home-checkin__button"
+                  type="submit" {% if payload.todayChecked %}disabled{% endif %}
+                  data-ai-checkin-button>
+            {% if payload.todayChecked %}今日已领{% else %}立即领取{% endif %}
+          </button>
+        </form>
+        <a class="rounded button ai-home-checkin__detail" href="{{ url('ai_tutor_credit_detail') }}">积分明细</a>
+      </div>
+    {% else %}
+      <div class="ai-home-checkin__line">
+        每日可领 <strong>{{ payload.amount }} 积分</strong>（有效期1个月）
+      </div>
+      <div class="ai-home-checkin__actions">
+        <a class="rounded primary button ai-home-checkin__button" href="{{ url('user_login') }}">登录领取</a>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<style>
+  .ai-home-checkin {
+    background: #2d8cf0;
+    border: 1px solid #4aa3ff;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(45, 140, 240, 0.16);
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .ai-home-checkin__top {
+    align-items: center;
+    color: #fff;
+    display: flex;
+    gap: 7px;
+    height: 30px;
+    padding: 0 10px;
+  }
+  .ai-home-checkin__top strong {
+    font-weight: 600;
+    max-width: 128px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ai-home-checkin__body {
+    background: #fff;
+    border-radius: 12px 12px 10px 10px;
+    margin: 0 4px 4px;
+    padding: 11px 12px 14px;
+  }
+  .ai-home-checkin__user {
+    border-bottom: 1px solid #eef1f3;
+    color: #6d7782;
+    font-size: 13px;
+    margin: -1px -12px 10px;
+    overflow: hidden;
+    padding: 0 12px 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ai-home-checkin__line {
+    color: #46515c;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .ai-home-checkin__line strong {
+    color: #1f2a33;
+    font-weight: 700;
+  }
+  .ai-home-checkin__actions {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .ai-home-checkin__actions form { margin: 0; }
+  .ai-home-checkin__button,
+  .ai-home-checkin__detail {
+    margin: 0;
+    min-width: 96px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .ai-home-checkin__button[disabled] {
+    background: #f2f3f5;
+    color: #aaa;
+    cursor: default;
+  }
+  @media screen and (max-width: 640px) {
+    .ai-home-checkin__actions { align-items: stretch; flex-direction: column; }
+    .ai-home-checkin__actions form,
+    .ai-home-checkin__button,
+    .ai-home-checkin__detail { width: 100%; }
+  }
+</style>
+<script>
+  (function () {
+    function initAiTutorCheckin() {
+      var cards = document.querySelectorAll('[data-ai-checkin-card]');
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        var form = card.querySelector('[data-ai-checkin-form]');
+        if (!form || form.dataset.bound === 'true') continue;
+        form.dataset.bound = 'true';
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+          var currentForm = event.currentTarget;
+          var currentCard = currentForm.closest('[data-ai-checkin-card]');
+          var button = currentCard.querySelector('[data-ai-checkin-button]');
+          if (!button || button.disabled) return;
+          var originalText = button.textContent;
+          button.disabled = true;
+          button.textContent = '领取中...';
+          fetch(currentForm.action, {
+            method: 'POST',
+            body: new FormData(currentForm),
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+          }).then(function (res) {
+            if (!res.ok) throw new Error('request failed');
+            return res.json();
+          }).then(function (data) {
+            var days = currentCard.querySelector('[data-ai-checkin-days]');
+            var credits = currentCard.querySelector('[data-ai-checkin-credits]');
+            var balance = currentCard.querySelector('[data-ai-checkin-balance]');
+            if (days) days.textContent = data.monthDays;
+            if (credits) credits.textContent = data.monthCredits;
+            if (balance) balance.textContent = data.balance;
+            button.classList.remove('primary');
+            button.textContent = '今日已领';
+            button.disabled = true;
+          }).catch(function () {
+            button.disabled = false;
+            button.textContent = originalText;
+            alert('领取失败，请稍后再试。');
+          });
+        });
+      }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAiTutorCheckin);
+    else initAiTutorCheckin();
+  })();
+</script>
