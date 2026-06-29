@@ -1,0 +1,517 @@
+{% extends "domain_base.html" %}
+{% import "components/user.html" as user with context %}
+{% block domain_content %}
+<div class="section">
+  <div class="section__header ai-proctor-detail-head">
+    <div>
+      <h1 class="section__title">Session 评分</h1>
+      <span class="ai-proctor-subtitle">
+        <a href="{{ url('ai_tutor_proctor', query={tid:session.tidText}) }}">返回普查列表</a>
+        / {{ tdoc.title if tdoc else session.tidText }} / uid {{ session.uid }}
+      </span>
+    </div>
+    <span class="ai-proctor-badge sev-bg-{{ session.severity }}">{{ session.severityLabel }}</span>
+  </div>
+  <div class="section__body ai-score-card">
+    <div class="ai-score-meta">
+      <dl><dt>学生</dt><dd>{% if student %}{{ user.render_inline(student, badge=false) }}{% else %}uid={{ session.uid }}{% endif %}</dd></dl>
+      <dl><dt>题目</dt><dd>{% if pdoc %}<a href="/d/{{ session.domainId }}/p/{{ session.pid }}" target="_blank">{{ pdoc.pid or session.pid }}. {{ pdoc.title }}</a>{% else %}{{ session.pid }}{% endif %}</dd></dl>
+      <dl><dt>来源</dt><dd>{{ session.sourceLabel }}{% if tdoc %} · <a href="{{ url('homework_detail' if tdoc.rule == 'homework' else 'contest_detail', tid=tdoc.docId) }}" target="_blank">{{ tdoc.title }}</a>{% endif %}</dd></dl>
+      <dl><dt>记录</dt><dd>{% if session.ridText %}<a class="ai-rid-link" href="{{ url('record_detail', rid=session.ridText) }}" target="_blank">{{ session.ridText }}</a>{% else %}<span class="text-gray">-</span>{% endif %}</dd></dl>
+      <dl><dt>时段</dt><dd>{{ datetimeSpan(rawSession.startedAt, true)|safe if rawSession.startedAt else '-' }} — {{ datetimeSpan(rawSession.lastEventAt, true)|safe if rawSession.lastEventAt else '-' }}</dd></dl>
+      <dl><dt>复核</dt><dd>{{ session.reviewLabel }}{% if rawSession.review and rawSession.review.note %} · {{ rawSession.review.note }}{% endif %}</dd></dl>
+      <div class="ai-hit-summary">
+        <div class="ai-hit-title">命中依据</div>
+        {% if session.hitEvidence|length %}
+          <div class="ai-hit-list">
+            {% for ev in session.hitEvidence %}
+              <a class="ai-hit-chip hit-{{ ev.severity }}" href="#ev-{{ ev.factor }}">
+                <strong>{{ ev.name }}</strong>
+                <span>{{ ev.score }} / {{ ev.weight }}</span>
+              </a>
+            {% endfor %}
+          </div>
+          <div class="ai-hit-reason">
+            {% for ev in session.hitEvidence.slice(0, 2) %}
+              <span>{{ ev.reason }}</span>{% if not loop.last %}<span class="ai-hit-sep">；</span>{% endif %}
+            {% endfor %}
+          </div>
+        {% else %}
+          <span class="text-gray">暂无命中评分项。</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="ai-score-big">
+      <div class="ai-score-num sev-text-{{ session.severity }}">{{ session.total }}</div>
+      <div class="ai-score-label">综合可疑度 / 100</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">同场 Session 对比</h1>
+  </div>
+  <div class="section__body no-padding">
+    <table class="data-table ai-compare-table">
+      <thead>
+        <tr>
+          <th>学生</th>
+          <th>题目</th>
+          <th class="col--center">编码速率</th>
+          <th class="col--center">风格翻转</th>
+          <th class="col--center">总分</th>
+          <th>严重度</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in comparison %}
+        <tr {% if row.sid == session.sid %}class="active"{% endif %}>
+          <td>{% if row.user %}{{ user.render_inline(row.user, badge=false) }}{% else %}uid={{ row.uid }}{% endif %}</td>
+          <td>{% if row.pdoc %}<a href="/d/{{ row.domainId }}/p/{{ row.pid }}" target="_blank">{{ row.pdoc.pid or row.pid }}. {{ row.pdoc.title }}</a>{% else %}{{ row.pid }}{% endif %}</td>
+          <td class="col--center">{{ row.codingRate|round(3) }}</td>
+          <td class="col--center">{% if row.styleFlips !== null %}{{ row.styleFlips }} / 5{% else %}-{% endif %}</td>
+          <td class="col--center"><strong>{{ row.total }}</strong></td>
+          <td><span class="ai-proctor-badge sev-bg-{{ row.severity }}">{{ row.severityLabel }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">事件时间线</h1>
+  </div>
+  <div class="section__body">
+    {% if events|length == 0 %}
+      <p class="text-gray">暂无原始事件。只有聚合 Session 数据时，仍可查看评分依据。</p>
+    {% else %}
+      <div class="ai-timeline">
+      {% for ev in events %}
+        <div class="ai-timeline-item">
+          <div class="ai-timeline-time">{{ datetimeSpan(ev.ts, true)|safe if ev.ts else '-' }}</div>
+          <div class="ai-timeline-dot type-{{ ev.type }}"></div>
+          <div class="ai-timeline-label">{{ ev.type }}</div>
+          <div class="ai-timeline-note">
+            {% if ev.meta and ev.meta.lines %}{{ ev.meta.lines }} 行{% elif ev.meta and ev.meta.rid %}<a class="ai-rid-link" href="{{ url('record_detail', rid=ev.meta.rid) }}" target="_blank">记录</a>{% else %}&nbsp;{% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">评分依据</h1>
+    <span class="ai-proctor-subtitle">每项均保留输入、公式、阈值和结论</span>
+  </div>
+  <div class="section__body ai-evidence-grid">
+    {% if rawSession.score.breakdown|length == 0 %}
+      <p class="text-gray">暂无 evidence breakdown。</p>
+    {% else %}
+      {% for ev in rawSession.score.breakdown %}
+        <div class="ai-ev-card ev-{{ ev.severity or 'none' }}" id="ev-{{ ev.factor }}">
+          <div class="ai-ev-card-head">
+            <div>
+              <strong>{{ ev.name or ev.factor }}</strong>
+              <span class="ai-ev-code">{{ ev.factor }}</span>
+            </div>
+            <div class="ai-ev-score">{{ ev.score }} / {{ ev.weight }}</div>
+          </div>
+          <div class="ai-ev-body">
+            {% if ev.inputs %}
+              <dl><dt>输入</dt><dd>{{ ev.inputsText }}</dd></dl>
+            {% endif %}
+            {% if ev.formula %}
+              <dl><dt>公式</dt><dd><code>{{ ev.formula }}</code></dd></dl>
+            {% endif %}
+            {% if ev.value !== undefined %}
+              <dl><dt>结果</dt><dd>{{ ev.value }}</dd></dl>
+            {% endif %}
+            {% if ev.threshold %}
+              <dl><dt>阈值</dt><dd>{{ ev.thresholdText }}</dd></dl>
+            {% endif %}
+            <div class="ai-ev-reason">{{ ev.reason or '未提供结论。' }}</div>
+          </div>
+        </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">粘贴代码片段</h1>
+    <span class="ai-proctor-subtitle">最多展示已入库的截断文本</span>
+  </div>
+  <div class="section__body">
+    {% if latestPaste and latestPaste.text %}
+      <pre class="ai-code-block">{{ latestPaste.text }}</pre>
+    {% else %}
+      <p class="text-gray">暂无粘贴代码文本。</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">复核操作</h1>
+    <a class="button" href="{{ url('ai_tutor_proctor_session_export', sid=session.sid) }}">导出原始事件 JSON</a>
+  </div>
+  <div class="section__body">
+    <form method="post" class="ai-review-form ai-ai-review-form" id="ai-ai-review-form">
+      <input type="hidden" name="operation" value="aiReview">
+      <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+      <button class="rounded button" type="submit" id="ai-ai-review-button">AI 辅助复核</button>
+      <span class="text-gray">将本 Session 的本地证据、提交代码、历史风格样本发送到当前域配置的 AI 模型。</span>
+    </form>
+    {% if aiReviewError %}
+      <div class="ai-ai-review-error" id="ai-ai-review-error">AI 复核失败：{{ aiReviewError.message }}</div>
+    {% else %}
+      <div class="ai-ai-review-error" id="ai-ai-review-error" style="display:none;"></div>
+    {% endif %}
+    <div class="ai-ai-review" id="ai-ai-review-box" {% if not aiReview %}style="display:none;"{% endif %}>
+        <div class="ai-ai-review-meta">
+          <strong>AI 复核建议</strong>
+          <span id="ai-ai-review-model">{{ aiReview.model if aiReview else '' }}</span>
+          <span id="ai-ai-review-duration">{{ aiReview.durationMs ~ 'ms' if aiReview else '' }}</span>
+          <span id="ai-ai-review-time">{{ datetimeSpan(aiReview.createdAt, true)|safe if aiReview and aiReview.createdAt else '' }}</span>
+        </div>
+        <div class="ai-ai-review-content markdown" id="ai-ai-review-content">{% if aiReview %}{{ aiReview.content|markdown|safe }}{% endif %}</div>
+        <div class="ai-ai-review-status" id="ai-ai-review-status" style="display:none;"></div>
+        <div class="ai-interrupted-warning" id="ai-ai-review-interrupted" {% if not aiReview or not aiReview.interrupted %}style="display:none;"{% endif %}>
+          AI 回复可能中断了。
+          <button class="rounded button" type="button" id="ai-ai-review-regenerate">重新生成此次回复</button>
+        </div>
+    </div>
+    <form method="post" class="ai-review-form">
+      <input type="hidden" name="operation" value="review">
+      <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+      <select class="select" name="state">
+        <option value="watch">继续观察</option>
+        <option value="false_positive">标记为误报</option>
+        <option value="confirmed">已人工确认</option>
+      </select>
+      <input class="textbox" name="note" value="{{ rawSession.review.note if rawSession.review else '' }}" maxlength="500" placeholder="老师备注，最多 500 字">
+      <button class="rounded primary button" type="submit">保存复核</button>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById('ai-ai-review-form');
+  if (!form) return;
+  var button = document.getElementById('ai-ai-review-button');
+  var statusEl = document.getElementById('ai-ai-review-status');
+  var errorEl = document.getElementById('ai-ai-review-error');
+  var box = document.getElementById('ai-ai-review-box');
+  var contentEl = document.getElementById('ai-ai-review-content');
+  var modelEl = document.getElementById('ai-ai-review-model');
+  var durationEl = document.getElementById('ai-ai-review-duration');
+  var timeEl = document.getElementById('ai-ai-review-time');
+  var interruptedEl = document.getElementById('ai-ai-review-interrupted');
+  var regenerateBtn = document.getElementById('ai-ai-review-regenerate');
+  var csrfInput = form.querySelector('input[name="csrfToken"]');
+
+  function escapeHtml(s) {
+    return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function renderInlineMd(s) {
+    return escapeHtml(s)
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function renderMarkdown(text) {
+    var src = (text || '').replace(/\r\n/g, '\n');
+    var blocks = [];
+    src = src.replace(/```([\s\S]*?)```/g, function (_, code) {
+      var token = '\u0000CODE' + blocks.length + '\u0000';
+      blocks.push('<pre><code>' + escapeHtml(code.replace(/^\n|\n$/g, '')) + '</code></pre>');
+      return token;
+    });
+    var lines = src.split('\n');
+    var html = '';
+    var listOpen = false;
+    var para = [];
+    function flushPara() {
+      if (!para.length) return;
+      html += '<p>' + renderInlineMd(para.join('\n')) + '</p>';
+      para = [];
+    }
+    function closeList() {
+      if (listOpen) {
+        html += '</ul>';
+        listOpen = false;
+      }
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var tokenMatch = line.match(/^\u0000CODE(\d+)\u0000$/);
+      if (tokenMatch) {
+        flushPara(); closeList();
+        html += blocks[Number(tokenMatch[1])] || '';
+        continue;
+      }
+      if (!line.trim()) {
+        flushPara(); closeList();
+        continue;
+      }
+      var heading = line.match(/^(#{1,4})\s+(.+)$/);
+      if (heading) {
+        flushPara(); closeList();
+        var level = Math.min(4, heading[1].length + 1);
+        html += '<h' + level + '>' + renderInlineMd(heading[2]) + '</h' + level + '>';
+        continue;
+      }
+      var bullet = line.match(/^\s*[-*]\s+(.+)$/);
+      if (bullet) {
+        flushPara();
+        if (!listOpen) {
+          html += '<ul>';
+          listOpen = true;
+        }
+        html += '<li>' + renderInlineMd(bullet[1]) + '</li>';
+        continue;
+      }
+      para.push(line);
+    }
+    flushPara(); closeList();
+    html = html.replace(/\u0000CODE(\d+)\u0000/g, function (_, n) { return blocks[Number(n)] || ''; });
+    return html || '<p></p>';
+  }
+
+  function setStatus(html) {
+    if (!statusEl) return;
+    statusEl.innerHTML = html || '';
+    statusEl.style.display = html ? '' : 'none';
+  }
+
+  function showError(text) {
+    if (!errorEl) return;
+    errorEl.style.display = '';
+    errorEl.textContent = 'AI 复核失败：' + text;
+  }
+
+  function showInterrupted() {
+    if (interruptedEl) interruptedEl.style.display = '';
+  }
+
+  function hideInterrupted() {
+    if (interruptedEl) interruptedEl.style.display = 'none';
+  }
+
+  async function streamInto(resp, onEvent) {
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder('utf-8');
+    var buf = '';
+    while (true) {
+      var r = await reader.read();
+      if (r.done) break;
+      buf += decoder.decode(r.value, { stream: true });
+      var parts = buf.split('\n\n');
+      buf = parts.pop() || '';
+      for (var i = 0; i < parts.length; i++) {
+        var line = parts[i].trim();
+        if (!line.startsWith('data:')) continue;
+        var data = line.slice(5).trim();
+        if (!data) continue;
+        try { onEvent(JSON.parse(data)); } catch (e) { /* ignore malformed event */ }
+      }
+    }
+  }
+
+  async function runAiReview(ev) {
+    if (ev) ev.preventDefault();
+    if (button) button.disabled = true;
+    if (regenerateBtn) regenerateBtn.disabled = true;
+    if (box) box.style.display = '';
+    if (errorEl) errorEl.style.display = 'none';
+    hideInterrupted();
+    if (contentEl) contentEl.innerHTML = '';
+    if (modelEl) modelEl.textContent = '';
+    if (durationEl) durationEl.textContent = '';
+    if (timeEl) timeEl.textContent = '';
+    setStatus('<span class="ai-spinner"></span>正在调用 AI，请耐心等待...');
+
+    var body = new URLSearchParams();
+    body.set('operation', 'aiReview');
+    if (csrfInput && csrfInput.value) body.set('csrfToken', csrfInput.value);
+
+    var full = '';
+    try {
+      var resp = await fetch(window.location.pathname, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (!resp.ok || !resp.body) {
+        var msg = resp.statusText || '请求失败';
+        try {
+          var json = await resp.json();
+          msg = json.error || json.message || msg;
+        } catch (e) { /* ignore */ }
+        showError(msg);
+        setStatus('');
+        if (button) button.disabled = false;
+        return;
+      }
+      setStatus('<span class="ai-spinner"></span>正在接收 AI 复核建议...');
+      await streamInto(resp, function (event) {
+        if (event.type === 'chunk') {
+          full += event.content || '';
+          if (contentEl) contentEl.innerHTML = renderMarkdown(full);
+        } else if (event.type === 'done') {
+          if (modelEl) modelEl.textContent = event.model || '';
+          if (durationEl && typeof event.durationMs === 'number') durationEl.textContent = event.durationMs + 'ms';
+          if (timeEl) timeEl.textContent = '刚刚';
+          if (event.interrupted) {
+            showInterrupted();
+            setStatus('AI 回复可能中断，可以点击“重新生成此次回复”。');
+          } else {
+            setStatus('AI 复核完成');
+          }
+          if (button) button.disabled = false;
+          if (regenerateBtn) regenerateBtn.disabled = false;
+        } else if (event.type === 'error') {
+          showError(event.error || '未知错误');
+          setStatus('');
+          if (button) button.disabled = false;
+          if (regenerateBtn) regenerateBtn.disabled = false;
+        }
+      });
+    } catch (e) {
+      showError(e.message || String(e));
+      setStatus('');
+      if (button) button.disabled = false;
+      if (regenerateBtn) regenerateBtn.disabled = false;
+    } finally {
+      if (full.trim() && !durationEl.textContent) {
+        showInterrupted();
+        setStatus('AI 回复可能中断，可以点击“重新生成此次回复”。');
+        if (button) button.disabled = false;
+        if (regenerateBtn) regenerateBtn.disabled = false;
+      }
+    }
+  }
+
+  form.addEventListener('submit', runAiReview);
+  if (regenerateBtn) regenerateBtn.addEventListener('click', runAiReview);
+
+  if (contentEl && contentEl.hasAttribute('data-raw')) {
+    var html = contentEl.innerHTML;
+    if (!html.trim().match(/^<p|^<h|^<ul|^<pre|^<blockquote|^<table/i)) {
+      contentEl.innerHTML = renderMarkdown(contentEl.textContent || '');
+    }
+    contentEl.removeAttribute('data-raw');
+  }
+})();
+</script>
+
+<style>
+  .ai-proctor-detail-head { align-items: center; display: flex; justify-content: space-between; }
+  .ai-proctor-subtitle { color: #78828d; display: block; font-size: 13px; margin-top: 5px; }
+  .ai-proctor-badge { border-radius: 999px; display: inline-block; font-size: 12px; line-height: 1; padding: 4px 8px; }
+  .sev-bg-red { background: #ffe5e9; color: #cb2431; }
+  .sev-bg-orange { background: #ffe3cc; color: #d15704; }
+  .sev-bg-yellow { background: #fff5cc; color: #735c00; }
+  .sev-bg-green { background: #e7f6ec; color: #22863a; }
+  .sev-text-red { color: #cb2431; }
+  .sev-text-orange { color: #d15704; }
+  .sev-text-yellow { color: #b08800; }
+  .sev-text-green { color: #22863a; }
+  .ai-score-card { align-items: center; display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 180px; }
+  .ai-score-meta dl { margin: 4px 0; }
+  .ai-score-meta dt { color: #444; display: inline; font-weight: 600; }
+  .ai-score-meta dd { display: inline; margin: 0 16px 0 6px; }
+  .ai-hit-summary { border-top: 1px solid #e8edf2; margin-top: 12px; padding-top: 10px; }
+  .ai-hit-title { color: #444; font-weight: 600; margin-bottom: 6px; }
+  .ai-hit-list { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; }
+  .ai-hit-chip {
+    align-items: center; border-radius: 999px; display: inline-flex; gap: 6px;
+    line-height: 1; padding: 5px 9px; text-decoration: none;
+  }
+  .ai-hit-chip:hover { text-decoration: none; }
+  .ai-hit-chip strong { font-size: 12px; font-weight: 600; }
+  .ai-hit-chip span { font-size: 12px; font-variant-numeric: tabular-nums; }
+  .ai-hit-chip.hit-high { background: #ffe5e9; color: #cb2431; }
+  .ai-hit-chip.hit-medium { background: #ffe3cc; color: #d15704; }
+  .ai-hit-chip.hit-low { background: #fff5cc; color: #735c00; }
+  .ai-hit-chip.hit-none { background: #eef1f4; color: #66737f; }
+  .ai-hit-reason { color: #66737f; font-size: 12.5px; line-height: 1.5; margin-top: 7px; }
+  .ai-hit-sep { color: #a0a8b0; }
+  .ai-score-big { border-left: 1px solid #eaecef; text-align: center; }
+  .ai-score-num { font-size: 48px; font-weight: 700; line-height: 1; }
+  .ai-score-label { color: #78828d; font-size: 12px; margin-top: 4px; }
+  .ai-compare-table tr.active td { background: #fffbea; }
+  .ai-timeline { display: flex; gap: 0; overflow-x: auto; padding: 8px 0 18px; }
+  .ai-timeline-item { flex: 0 0 110px; text-align: center; }
+  .ai-timeline-time, .ai-timeline-note { color: #78828d; font-size: 12px; }
+  .ai-timeline-label { color: #24292e; font-size: 12px; font-weight: 600; }
+  .ai-timeline-dot { background: #fff; border: 2px solid #78828d; border-radius: 50%; height: 14px; margin: 8px auto; width: 14px; }
+  .ai-timeline-dot.type-leave, .ai-timeline-dot.type-paste { background: #cb2431; border-color: #cb2431; }
+  .ai-timeline-dot.type-return { border-color: #22863a; }
+  .ai-timeline-dot.type-submit { background: #6f42c1; border-color: #6f42c1; }
+  .ai-evidence-grid { display: grid; gap: 12px; }
+  .ai-ev-card { border: 1px solid #eaecef; border-left: 4px solid #d1d5da; border-radius: 4px; overflow: hidden; }
+  .ai-ev-card.ev-high { border-left-color: #cb2431; }
+  .ai-ev-card.ev-medium { border-left-color: #f66a0a; }
+  .ai-ev-card.ev-low { border-left-color: #dbab09; }
+  .ai-ev-card-head { align-items: center; background: #fafbfc; border-bottom: 1px solid #eaecef; display: flex; justify-content: space-between; padding: 10px 14px; }
+  .ai-ev-code { color: #78828d; font-family: monospace; font-size: 12px; margin-left: 6px; }
+  .ai-ev-score { background: #f0f3f6; border-radius: 999px; font-weight: 700; padding: 2px 10px; }
+  .ai-ev-body { padding: 12px 14px; }
+  .ai-ev-body dl { display: grid; gap: 12px; grid-template-columns: 72px minmax(0, 1fr); margin: 6px 0; }
+  .ai-ev-body dt { color: #66737f; font-weight: 600; }
+  .ai-ev-body dd { margin: 0; overflow-wrap: anywhere; }
+  .ai-ev-reason { background: #fafbfc; border-left: 3px solid #d1d5da; margin-top: 10px; padding: 8px 12px; }
+  .ai-code-block { background: #f6f8fa; border: 1px solid #eaecef; border-radius: 3px; color: #24292e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.55; max-height: 360px; overflow: auto; padding: 10px 14px; white-space: pre; }
+  .ai-review-form { align-items: center; display: flex; gap: 8px; margin: 0; }
+  .ai-ai-review-form { border-bottom: 1px solid #eaecef; margin-bottom: 12px; padding-bottom: 12px; }
+  .ai-ai-review-error { background: #ffeef0; border: 1px solid #ffdce0; border-radius: 4px; color: #cb2431; margin: 0 0 12px; padding: 8px 12px; }
+  .ai-ai-review { border: 1px solid #eaecef; border-radius: 4px; margin: 0 0 14px; overflow: hidden; }
+  .ai-ai-review-meta { align-items: center; background: #fafbfc; border-bottom: 1px solid #eaecef; display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+  .ai-ai-review-meta span { color: #66737f; font-size: 12px; }
+  .ai-ai-review-content { background: #fff; color: #24292e; line-height: 1.65; margin: 0; overflow: auto; padding: 12px 14px; }
+  .ai-ai-review-content h2, .ai-ai-review-content h3, .ai-ai-review-content h4 { line-height: 1.45; margin: 12px 0 6px; }
+  .ai-ai-review-content h2 { font-size: 18px; }
+  .ai-ai-review-content h3 { font-size: 16px; }
+  .ai-ai-review-content h4 { font-size: 14px; }
+  .ai-ai-review-content p { margin: 7px 0; }
+  .ai-ai-review-content ul { margin: 6px 0 8px 22px; padding: 0; }
+  .ai-ai-review-content li { margin: 3px 0; }
+  .ai-ai-review-content code { background: rgba(0,0,0,0.06); border-radius: 3px; font-family: Consolas, Menlo, monospace; font-size: 0.92em; padding: 1px 5px; }
+  .ai-ai-review-content pre { background: #f6f8fa; border: 1px solid #eaecef; border-radius: 4px; overflow: auto; padding: 10px 12px; }
+  .ai-ai-review-content pre code { background: transparent; padding: 0; }
+  .ai-ai-review-status {
+    background: #f7fafc; border-top: 1px solid #eaecef; color: #66737f;
+    font-size: 13px; line-height: 1.5; padding: 10px 14px;
+  }
+  .ai-ai-review-status .ai-spinner {
+    animation: ai-spin 0.8s linear infinite; border: 2px solid #ccc; border-radius: 50%;
+    border-top-color: #4690d0; display: inline-block; height: 12px; margin-right: 4px;
+    vertical-align: middle; width: 12px;
+  }
+  .ai-interrupted-warning {
+    align-items: center; background: #fff7e6; border-top: 1px solid #f3d29c; color: #8a5a00;
+    display: flex; gap: 10px; justify-content: space-between; padding: 8px 12px;
+  }
+  .ai-interrupted-warning .button { margin: 0; white-space: nowrap; }
+  @keyframes ai-spin { to { transform: rotate(360deg); } }
+  .ai-review-form .textbox { flex: 1; margin: 0; }
+  .ai-review-form .select { margin: 0; width: 140px; }
+  @media screen and (max-width: 760px) {
+    .ai-score-card { grid-template-columns: 1fr; }
+    .ai-score-big { border-left: 0; border-top: 1px solid #eaecef; padding-top: 12px; }
+    .ai-review-form { align-items: stretch; flex-direction: column; }
+    .ai-review-form .select { width: 100%; }
+  }
+</style>
+{% endblock %}

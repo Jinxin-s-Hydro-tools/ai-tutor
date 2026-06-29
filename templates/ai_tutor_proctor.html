@@ -1,0 +1,194 @@
+{% extends "domain_base.html" %}
+{% import "components/paginator.html" as paginator with context %}
+{% import "components/user.html" as user with context %}
+{% block domain_content %}
+<div class="section">
+  <div class="section__header ai-proctor-header">
+    <div>
+      <h1 class="section__title">{{ domain.name }}：AI 可疑普查</h1>
+      <span class="ai-proctor-subtitle">
+        {% if tdoc %}{{ '作业' if tdoc.rule == 'homework' else '比赛' }}：{{ tdoc.title }}{% else %}全域 Session{% endif %}
+      </span>
+    </div>
+  </div>
+  <div class="section__body">
+    <form method="get" class="ai-proctor-filters">
+      <input class="textbox inline compact" name="tid" value="{{ tid }}" placeholder="作业 / 比赛名称" list="ai-proctor-contests">
+      <input class="textbox inline compact" name="q" value="{{ q }}" placeholder="学生姓名 / uid" list="ai-proctor-users">
+      <input class="textbox inline compact" name="pid" value="{{ pid }}" placeholder="题号 / 题目名称" list="ai-proctor-problems">
+      <datalist id="ai-proctor-contests">
+        {% for option in filterOptions.contests %}
+          <option value="{{ option.value }}" label="{{ option.label }}"></option>
+        {% endfor %}
+      </datalist>
+      <datalist id="ai-proctor-users">
+        {% for option in filterOptions.users %}
+          <option value="{{ option.value }}" label="{{ option.label }}"></option>
+        {% endfor %}
+      </datalist>
+      <datalist id="ai-proctor-problems">
+        {% for option in filterOptions.problems %}
+          <option value="{{ option.value }}" label="{{ option.label }}"></option>
+        {% endfor %}
+      </datalist>
+      <select class="select inline compact" name="severity">
+        <option value="">全部严重度</option>
+        <option value="red" {% if severity == 'red' %}selected{% endif %}>严重</option>
+        <option value="orange" {% if severity == 'orange' %}selected{% endif %}>可疑</option>
+        <option value="yellow" {% if severity == 'yellow' %}selected{% endif %}>轻度</option>
+        <option value="green" {% if severity == 'green' %}selected{% endif %}>正常</option>
+      </select>
+      <select class="select inline compact" name="review">
+        <option value="">全部复核状态</option>
+        <option value="unreviewed" {% if review == 'unreviewed' %}selected{% endif %}>未复核</option>
+        <option value="watch" {% if review == 'watch' %}selected{% endif %}>继续观察</option>
+        <option value="false_positive" {% if review == 'false_positive' %}selected{% endif %}>误报</option>
+        <option value="confirmed" {% if review == 'confirmed' %}selected{% endif %}>已确认</option>
+      </select>
+      <button class="button" type="submit">查询</button>
+      {% if tid or q or pid or severity or review %}
+        <a class="button" href="{{ url('ai_tutor_proctor') }}">清除</a>
+      {% endif %}
+    </form>
+    <form method="post" class="ai-proctor-backfill">
+      <input type="hidden" name="operation" value="backfill">
+      <input type="hidden" name="csrfToken" value="{{ handler.csrfToken }}">
+      <input type="hidden" name="tid" value="{{ tid }}">
+      <input type="hidden" name="q" value="{{ q }}">
+      <input type="hidden" name="pid" value="{{ pid }}">
+      <label class="text-gray">老数据拉取</label>
+      <input class="textbox inline compact" name="limit" value="300" type="number" min="1" max="2000">
+      <button class="rounded button" type="submit">拉取并评估老提交</button>
+      <span class="text-gray">按当前作业/学生/题目筛选，最多 2000 条。</span>
+    </form>
+    {% if backfillMessage %}
+      <div class="ai-proctor-backfill-message">{{ backfillMessage }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__body ai-proctor-summary">
+    <div><strong>{{ summary.sessions }}</strong><span>Session</span></div>
+    <div class="sev-red"><strong>{{ summary.severityCounts.red }}</strong><span>严重</span></div>
+    <div class="sev-orange"><strong>{{ summary.severityCounts.orange }}</strong><span>可疑</span></div>
+    <div class="sev-yellow"><strong>{{ summary.severityCounts.yellow }}</strong><span>轻度</span></div>
+    <div><strong>{{ summary.signalLost }}</strong><span>信号缺失</span></div>
+    <div><strong>{{ summary.maxScore }}</strong><span>最高分</span></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section__header">
+    <h1 class="section__title">普查结果 <small style="color:#888;font-weight:normal;">共 {{ totalCount }} 条</small></h1>
+  </div>
+  <div class="section__body no-padding">
+    {% if rows|length == 0 %}
+      <div class="ai-proctor-empty">
+        {% if q and matchedUserCount == 0 %}
+          没有找到匹配该用户名的用户。
+        {% else %}
+          暂无可疑普查 Session。采集端写入 <code>proctor.session</code> 后会显示在这里。
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="ai-proctor-table-wrap">
+        <table class="data-table ai-proctor-table">
+          <thead>
+            <tr>
+              <th>学生</th>
+              <th>来源</th>
+              <th>题目</th>
+              <th>提交记录 ID</th>
+              <th class="col--center">总分</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>
+                {% if row.user %}{{ user.render_inline(row.user, badge=false) }}{% else %}uid={{ row.uid }}{% endif %}
+                <span class="text-gray">#{{ row.uid }}</span>
+              </td>
+              <td>
+                <span class="text-gray">{{ row.sourceLabel }}</span>
+                {% if row.tdoc %}
+                  <div class="ai-proctor-ellipsis">
+                    <a href="{{ url('homework_detail' if row.tdoc.rule == 'homework' else 'contest_detail', tid=row.tdoc.docId) }}" target="_blank">{{ row.tdoc.title }}</a>
+                  </div>
+                {% else %}
+                  <div class="ai-proctor-ellipsis">{{ row.tidText }}</div>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.pdoc %}
+                  <a href="/d/{{ row.domainId }}/p/{{ row.pid }}" target="_blank">{{ row.pdoc.pid or row.pid }}. {{ row.pdoc.title }}</a>
+                {% else %}
+                  {{ row.pid }}
+                {% endif %}
+              </td>
+              <td>
+                {% if row.ridText %}
+                  <a class="ai-rid-link" href="{{ url('record_detail', rid=row.ridText) }}" target="_blank">{{ row.ridText }}</a>
+                {% else %}
+                  <span class="text-gray">-</span>
+                {% endif %}
+              </td>
+              <td class="col--center"><strong class="sev-text-{{ row.severity }}">{{ row.total }}</strong></td>
+              <td>
+                <span class="ai-proctor-badge sev-bg-{{ row.severity }}">{{ row.severityLabel }}</span>
+                {% if row.reviewState != 'unreviewed' %}
+                  <span class="ai-review-badge">{{ row.reviewLabel }}</span>
+                {% endif %}
+              </td>
+              <td>
+                <a class="rounded button" href="{{ url('ai_tutor_proctor_session', sid=row.sid) }}">详情</a>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {{ paginator.render(page, pageCount, add_qs=qs) }}
+    {% endif %}
+  </div>
+</div>
+
+<style>
+  .ai-proctor-header { align-items: center; display: flex; justify-content: space-between; }
+  .ai-proctor-subtitle { color: #78828d; display: block; font-size: 13px; margin-top: 5px; }
+  .ai-proctor-filters { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .ai-proctor-filters .textbox { width: 160px; }
+  .ai-proctor-filters .select { width: 120px; }
+  .ai-proctor-backfill { align-items: center; border-top: 1px solid #e8edf2; display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; padding-top: 12px; }
+  .ai-proctor-backfill .textbox { width: 88px; }
+  .ai-proctor-backfill-message { background: #e7f6ec; border: 1px solid #c7ead4; border-radius: 4px; color: #22863a; margin-top: 10px; padding: 8px 10px; }
+  .ai-proctor-summary { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .ai-proctor-summary div { border-right: 1px solid #e8edf2; min-height: 48px; padding: 4px 14px; }
+  .ai-proctor-summary div:last-child { border-right: 0; }
+  .ai-proctor-summary strong { display: block; font-size: 24px; line-height: 1.1; }
+  .ai-proctor-summary span { color: #78828d; font-size: 12px; }
+  .ai-proctor-empty { color: #888; padding: 32px 20px; text-align: center; }
+  .ai-proctor-table-wrap { overflow-x: auto; }
+  .ai-proctor-table { min-width: 820px; }
+  .ai-proctor-ellipsis { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-rid-link { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .ai-proctor-badge, .ai-review-badge { border-radius: 999px; display: inline-block; font-size: 12px; line-height: 1; padding: 4px 8px; }
+  .ai-review-badge { background: #eef1f4; color: #5f6b76; margin-left: 4px; }
+  .sev-bg-red { background: #ffe5e9; color: #cb2431; }
+  .sev-bg-orange { background: #ffe3cc; color: #d15704; }
+  .sev-bg-yellow { background: #fff5cc; color: #735c00; }
+  .sev-bg-green { background: #e7f6ec; color: #22863a; }
+  .sev-text-red, .sev-red { color: #cb2431; }
+  .sev-text-orange, .sev-orange { color: #d15704; }
+  .sev-text-yellow, .sev-yellow { color: #b08800; }
+  .sev-text-green { color: #22863a; }
+  @media screen and (max-width: 760px) {
+    .ai-proctor-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ai-proctor-summary div { border-right: 0; border-bottom: 1px solid #e8edf2; }
+    .ai-proctor-filters .textbox, .ai-proctor-filters .select { width: 100%; }
+  }
+</style>
+{% endblock %}

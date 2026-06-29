@@ -5,3 +5,7 @@ export { AiTutorDomainManageHandler } from './handlers/domain_manage';
 export { AiTutorDomainBatchHandler } from './handlers/domain_batch';
 export { AiTutorDomainQuotaHandler } from './handlers/domain_quota';
 export { AiTutorDomainRecordsHandler } from './handlers/admin';
+export {
+    AiTutorProctorEventHandler, AiTutorProctorHandler, AiTutorProctorHomeworkEntryHandler,
+    AiTutorProctorSessionExportHandler, AiTutorProctorSessionHandler,
+} from './handlers/proctor';
